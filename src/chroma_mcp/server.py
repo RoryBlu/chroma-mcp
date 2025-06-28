@@ -11,6 +11,8 @@ import uuid
 import time
 import json
 from typing_extensions import TypedDict
+import httpx
+from typing import List as TypingList
 
 
 from chromadb.api.collection_configuration import (
@@ -25,6 +27,56 @@ from chromadb.utils.embedding_functions import (
     VoyageAIEmbeddingFunction,
     RoboflowEmbeddingFunction,
 )
+
+class CustomEmbeddingFunction(EmbeddingFunction):
+    """Custom embedding function that uses an HTTP API endpoint."""
+    
+    def __init__(self):
+        self.api_url = os.getenv('EMBEDDINGS_API_URL')
+        self.model = os.getenv('EMBEDDING_MODEL')
+        self.dimension = int(os.getenv('EMBEDDING_DIMENSION', '768'))
+        
+        if not self.api_url:
+            raise ValueError("EMBEDDINGS_API_URL environment variable is required for custom embeddings")
+        if not self.model:
+            raise ValueError("EMBEDDING_MODEL environment variable is required for custom embeddings")
+            
+        # Ensure API URL ends with /embeddings
+        if not self.api_url.endswith('/embeddings'):
+            self.api_url = f"{self.api_url.rstrip('/')}/embeddings"
+    
+    def __call__(self, input: TypingList[str]) -> TypingList[TypingList[float]]:
+        """Generate embeddings for a list of input texts."""
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.post(
+                    self.api_url,
+                    json={
+                        "model": self.model,
+                        "input": input,
+                        "encoding_format": "float"
+                    }
+                )
+                response.raise_for_status()
+                
+                data = response.json()
+                embeddings = [item["embedding"] for item in data["data"]]
+                
+                # Validate dimensions
+                for embedding in embeddings:
+                    if len(embedding) != self.dimension:
+                        raise ValueError(f"Expected embedding dimension {self.dimension}, got {len(embedding)}")
+                        
+                return embeddings
+                
+        except httpx.RequestError as e:
+            raise RuntimeError(f"Failed to connect to embedding API: {e}")
+        except httpx.HTTPStatusError as e:
+            raise RuntimeError(f"Embedding API returned error {e.response.status_code}: {e.response.text}")
+        except KeyError as e:
+            raise RuntimeError(f"Invalid response format from embedding API: missing {e}")
+        except Exception as e:
+            raise RuntimeError(f"Error generating embeddings: {e}")
 
 # Initialize FastMCP server
 mcp = FastMCP("chroma")
@@ -80,6 +132,9 @@ def get_chroma_client(args=None):
         
         # Load environment variables from .env file if it exists
         load_dotenv(dotenv_path=args.dotenv_path)
+        
+        # Check for custom embedding API configuration and register if available
+        _register_custom_embedding_if_available()
         if args.client_type == 'http':
             if not args.host:
                 raise ValueError("Host must be provided via --host flag or CHROMA_HOST environment variable when using HTTP client")
@@ -176,20 +231,42 @@ mcp_known_embedding_functions: Dict[str, EmbeddingFunction] = {
     "voyageai": VoyageAIEmbeddingFunction,
     "roboflow": RoboflowEmbeddingFunction,
 }
+
+def _register_custom_embedding_if_available():
+    """Register custom embedding function if environment variables are available."""
+    api_url = os.getenv('EMBEDDINGS_API_URL')
+    model = os.getenv('EMBEDDING_MODEL')
+    
+    if api_url and model:
+        mcp_known_embedding_functions["custom"] = CustomEmbeddingFunction
+
+def _get_default_embedding_function():
+    """Get the default embedding function, preferring custom if available."""
+    if "custom" in mcp_known_embedding_functions:
+        return "custom"
+    return "default"
 @mcp.tool()
 async def chroma_create_collection(
     collection_name: str,
-    embedding_function_name: str = "default",
+    embedding_function_name: str | None = None,
     metadata: Dict | None = None,
 ) -> str:
     """Create a new Chroma collection with configurable HNSW parameters.
     
     Args:
         collection_name: Name of the collection to create
-        embedding_function_name: Name of the embedding function to use. Options: 'default', 'cohere', 'openai', 'jina', 'voyageai', 'ollama', 'roboflow'
+        embedding_function_name: Name of the embedding function to use. Options: 'default', 'cohere', 'openai', 'jina', 'voyageai', 'roboflow', 'custom'. If not specified, will auto-select 'custom' if EMBEDDINGS_API_URL is set, otherwise 'default'.
         metadata: Optional metadata dict to add to the collection
     """
     client = get_chroma_client()
+    
+    # Auto-select embedding function if not specified
+    if embedding_function_name is None:
+        embedding_function_name = _get_default_embedding_function()
+    
+    if embedding_function_name not in mcp_known_embedding_functions:
+        available_functions = list(mcp_known_embedding_functions.keys())
+        raise ValueError(f"Unknown embedding function '{embedding_function_name}'. Available options: {available_functions}")
     
     embedding_function = mcp_known_embedding_functions[embedding_function_name]
     
