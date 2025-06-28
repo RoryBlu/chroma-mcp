@@ -85,5 +85,4 @@ After deployment, you should see:
 4. Verify custom embeddings are being used
 
 ## Your Token
-Your Railway token: `ff737c31-b91d-4914-938b-1cdace53f606`
 (Keep this secure - it's already in this file now)

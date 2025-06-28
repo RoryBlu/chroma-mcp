@@ -1,0 +1,2 @@
+[environments.development]
+service = "chroma-mcp"
