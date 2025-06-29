@@ -13,5 +13,6 @@ RUN chmod +x /usr/local/bin/start-chromadb.sh
 
 EXPOSE 8000
 
-# Run as root for now to debug
+# Override the ENTRYPOINT to use bash directly
+ENTRYPOINT ["/bin/bash"]
 CMD ["/usr/local/bin/start-chromadb.sh"]
