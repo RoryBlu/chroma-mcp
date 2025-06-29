@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "chroma-admin": {
+      "command": "python3",
+      "args": [
+        "/Users/r.t.rawlings/chroma-mcp/mcp-chroma-bridge/mcp_chroma_bridge.py",
+        "--remote-url", "https://chroma-mcp-development.up.railway.app",
+        "--auth-token", "gi9v25dw33k086falw1c1i5m55b2uynt"
+      ]
+    }
+  }
+}
