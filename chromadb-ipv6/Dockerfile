@@ -1,17 +1,12 @@
-# ChromaDB with IPv6 support for Railway
+# ChromaDB with IPv6 support for Railway - Simple version
 FROM ghcr.io/chroma-core/chroma:latest
 
-# Install socat for dual-stack proxy
+# Create a simple wrapper script
 USER root
-RUN apt-get update && apt-get install -y socat && rm -rf /var/lib/apt/lists/*
-
-# Create entrypoint script
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Switch back to chroma user
+COPY start-chromadb.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start-chromadb.sh
 USER chroma
 
 EXPOSE 8000
 
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["/usr/local/bin/start-chromadb.sh"]
