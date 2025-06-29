@@ -170,6 +170,17 @@ def get_chroma_client(args=None):
                 print(f"  SSL: {client_kwargs['ssl']}")
                 print(f"  Auth: {'Yes' if args.custom_auth_credentials else 'No'}")
                 
+                # For Railway internal networking, we might need to handle IPv6
+                # Some HTTP clients have issues with IPv6 addresses
+                import socket
+                if args.host and '.railway.internal' in args.host:
+                    try:
+                        # Try to resolve the hostname
+                        addrs = socket.getaddrinfo(args.host, client_kwargs['port'], socket.AF_UNSPEC, socket.SOCK_STREAM)
+                        print(f"  Resolved addresses: {[addr[4][0] for addr in addrs]}")
+                    except Exception as e:
+                        print(f"  DNS resolution error: {e}")
+                
                 _chroma_client = chromadb.HttpClient(**client_kwargs)
             except ssl.SSLError as e:
                 print(f"SSL connection failed: {str(e)}")
