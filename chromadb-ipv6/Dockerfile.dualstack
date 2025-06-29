@@ -1,0 +1,43 @@
+# ChromaDB with dual-stack (IPv4 + IPv6) support for Railway
+FROM ghcr.io/chroma-core/chroma:latest
+
+USER root
+
+# Install nginx for dual-stack proxy
+RUN apt-get update && \
+    apt-get install -y nginx && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create nginx config for dual-stack proxy
+RUN echo 'server { \n\
+    listen 8000; \n\
+    listen [::]:8000; \n\
+    \n\
+    location / { \n\
+        proxy_pass http://127.0.0.1:8001; \n\
+        proxy_set_header Host $host; \n\
+        proxy_set_header X-Real-IP $remote_addr; \n\
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; \n\
+        proxy_set_header X-Forwarded-Proto $scheme; \n\
+    } \n\
+}' > /etc/nginx/sites-available/default
+
+# Create startup script
+RUN echo '#!/bin/bash \n\
+set -e \n\
+echo "Starting ChromaDB with dual-stack support..." \n\
+echo "Starting nginx proxy on port 8000 (IPv4 + IPv6)..." \n\
+nginx \n\
+echo "Starting ChromaDB on localhost:8001 (IPv4 only)..." \n\
+export CHROMA_HOST_ADDR=127.0.0.1 \n\
+export PORT=8001 \n\
+cd /chroma \n\
+exec uvicorn chromadb.app:app --host 127.0.0.1 --port 8001 --workers ${CHROMA_WORKERS:-1} --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE:-30}' \
+> /start-dualstack.sh && chmod +x /start-dualstack.sh
+
+USER chroma
+
+EXPOSE 8000
+
+ENTRYPOINT []
+CMD ["/start-dualstack.sh"]
