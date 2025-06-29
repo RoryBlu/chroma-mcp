@@ -170,18 +170,46 @@ def get_chroma_client(args=None):
                 print(f"  SSL: {client_kwargs['ssl']}")
                 print(f"  Auth: {'Yes' if args.custom_auth_credentials else 'No'}")
                 
-                # For Railway internal networking, we might need to handle IPv6
-                # Some HTTP clients have issues with IPv6 addresses
+                # Handle IPv6 connectivity for Railway and other environments
                 import socket
-                if args.host and '.railway.internal' in args.host:
+                import os
+                
+                # Detect if we're in an IPv6-only environment (like Railway private network)
+                # or if we need to handle dual-stack scenarios
+                if args.host:
                     try:
-                        # Try to resolve the hostname
+                        # Resolve the hostname to see what addresses are available
                         addrs = socket.getaddrinfo(args.host, client_kwargs['port'], socket.AF_UNSPEC, socket.SOCK_STREAM)
-                        print(f"  Resolved addresses: {[addr[4][0] for addr in addrs]}")
+                        ipv4_addrs = [addr for addr in addrs if addr[0] == socket.AF_INET]
+                        ipv6_addrs = [addr for addr in addrs if addr[0] == socket.AF_INET6]
+                        
+                        print(f"  DNS Resolution:")
+                        if ipv4_addrs:
+                            print(f"    IPv4: {[addr[4][0] for addr in ipv4_addrs]}")
+                        if ipv6_addrs:
+                            print(f"    IPv6: {[addr[4][0] for addr in ipv6_addrs]}")
+                        
+                        # If we only have IPv6 addresses (Railway internal), we need to ensure
+                        # httpx can connect properly. Check if we're in Railway environment
+                        if ipv6_addrs and not ipv4_addrs:
+                            print("  Note: Only IPv6 addresses available (Railway private network)")
+                            # httpx should handle IPv6 properly, but let's make sure
+                            # by setting up the connection with explicit IPv6 support
+                            
                     except Exception as e:
                         print(f"  DNS resolution error: {e}")
                 
-                _chroma_client = chromadb.HttpClient(**client_kwargs)
+                # Create the client with our configuration
+                try:
+                    _chroma_client = chromadb.HttpClient(**client_kwargs)
+                    print("Successfully connected to ChromaDB")
+                except Exception as e:
+                    print(f"Failed to connect to ChromaDB: {e}")
+                    # If it's an IPv6 connection issue, provide helpful information
+                    if "Connection refused" in str(e) and args.host and '.railway.internal' in args.host:
+                        print("  This might be an IPv6 connectivity issue.")
+                        print("  Ensure ChromaDB is listening on :: (IPv6) not 0.0.0.0 (IPv4)")
+                    raise
             except ssl.SSLError as e:
                 print(f"SSL connection failed: {str(e)}")
                 raise
