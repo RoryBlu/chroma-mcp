@@ -1,8 +1,12 @@
 # ChromaDB with IPv6 support for Railway
 FROM ghcr.io/chroma-core/chroma:latest
 
-# CRITICAL: Set ChromaDB to bind to IPv6 for Railway private networking
-# Note: This makes it IPv6-only, so public IPv4 access won't work
-ENV CHROMA_HOST_ADDR=::
-
-# The original image should handle everything else
+# ChromaDB ignores CHROMA_HOST_ADDR env var - must use command line
+# Override the default command to force IPv6 binding
+CMD ["uvicorn", "chromadb.app:app", \
+     "--host", "::", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--proxy-headers", \
+     "--log-config", "chromadb/log_config.yml", \
+     "--timeout-keep-alive", "30"]
