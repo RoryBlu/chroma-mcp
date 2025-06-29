@@ -38,9 +38,12 @@ railway init
 echo "🔧 Setting environment variables..."
 
 # Chroma Configuration (HTTP client to external server)
+# IMPORTANT: Check your Chroma server's private networking port in Railway dashboard!
+# Go to chroma-gjdq service → Settings → Networking → Private Networking
+# Use the port shown there, NOT necessarily 8000!
 railway variables set CHROMA_CLIENT_TYPE=http
-railway variables set CHROMA_HOST=chroma-gjdq
-railway variables set CHROMA_PORT=8000
+railway variables set CHROMA_HOST=chroma-gjdq.railway.internal
+railway variables set CHROMA_PORT=8000  # CHANGE THIS to match Railway's private networking port!
 railway variables set CHROMA_SSL=false
 
 # Custom Embedding API Configuration
@@ -50,8 +53,8 @@ railway variables set EMBEDDING_DIMENSION=768
 
 echo "✅ Environment variables set:"
 echo "  - CHROMA_CLIENT_TYPE=http"
-echo "  - CHROMA_HOST=chroma-gjdq"
-echo "  - CHROMA_PORT=8000"
+echo "  - CHROMA_HOST=chroma-gjdq.railway.internal"
+echo "  - CHROMA_PORT=8000 (VERIFY THIS MATCHES RAILWAY's PRIVATE NETWORKING PORT!)"
 echo "  - CHROMA_SSL=false"
 echo "  - EMBEDDINGS_API_URL=https://embeddings-development.up.railway.app"
 echo "  - EMBEDDING_MODEL=Alibaba-NLP/gte-multilingual-base"

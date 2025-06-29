@@ -43,13 +43,31 @@ export RAILWAY_TOKEN=your_token_here
 5. Select the `chroma-mcp` repository
 
 #### Step 2: Configure Environment Variables
-In the Railway dashboard, go to your project and click **"Variables"**:
+
+**IMPORTANT: Railway Private Networking Setup**
+
+Before setting environment variables, you MUST enable private networking:
+
+1. **Enable Private Networking on your Chroma Server (chroma-gjdq):**
+   - Go to your `chroma-gjdq` service in Railway
+   - Click "Settings" → "Networking"
+   - Enable "Private Networking"
+   - Note the **exact hostname and port** shown (Railway assigns these)
+
+2. **Enable Private Networking on your Chroma MCP service:**
+   - Go to your Chroma MCP service
+   - Click "Settings" → "Networking"
+   - Enable "Private Networking"
+
+3. **Set Environment Variables:**
+   
+   In the Railway dashboard, go to your Chroma MCP project and click **"Variables"**:
 
 ```bash
 # Chroma Configuration (HTTP client to external server)
 CHROMA_CLIENT_TYPE=http
-CHROMA_HOST=chroma-gjdq
-CHROMA_PORT=8000
+CHROMA_HOST=chroma-gjdq.railway.internal
+CHROMA_PORT=<PORT FROM CHROMA SERVER's PRIVATE NETWORKING SETTINGS>
 CHROMA_SSL=false
 
 # Custom Embedding API Configuration (Base Config)
@@ -57,6 +75,8 @@ EMBEDDINGS_API_URL=https://embeddings-development.up.railway.app
 EMBEDDING_MODEL=Alibaba-NLP/gte-multilingual-base
 EMBEDDING_DIMENSION=768
 ```
+
+**Note:** The CHROMA_PORT must match what Railway shows in the Chroma server's private networking settings, NOT necessarily 8000!
 
 #### Step 3: Deploy
 Railway will automatically detect the `Dockerfile` and start building. The build process will:
@@ -76,11 +96,14 @@ railway init
 ```
 
 #### Step 2: Set Environment Variables
+
+**First, check your Chroma server's private networking port in Railway dashboard!**
+
 ```bash
 # Chroma Configuration
 railway variables set CHROMA_CLIENT_TYPE=http
-railway variables set CHROMA_HOST=chroma-gjdq
-railway variables set CHROMA_PORT=8000
+railway variables set CHROMA_HOST=chroma-gjdq.railway.internal
+railway variables set CHROMA_PORT=<PORT_FROM_PRIVATE_NETWORKING>  # Check Railway dashboard!
 railway variables set CHROMA_SSL=false
 
 # Custom Embedding API Configuration
@@ -229,10 +252,27 @@ After deployment, you should see:
    - Verify environment variables are set correctly
    - Ensure your embedding API is accessible
 
-3. **Connection Issues**
-   - Verify `CHROMA_HOST` and `CHROMA_PORT` if using HTTP client
-   - Check SSL settings (`CHROMA_SSL=true/false`)
-   - Ensure your external services are accessible from Railway
+3. **Connection Issues (MOST COMMON)**
+   
+   **Railway Private Networking Issues:**
+   - **"Connection refused" errors** usually mean incorrect port configuration
+   - Go to your Chroma server service → Settings → Networking
+   - Enable "Private Networking" if not already enabled
+   - Use the **exact port shown in Private Networking settings** (NOT the application port!)
+   - Example: If Railway shows port 5432 for private networking, use that, not 8000
+   
+   **Correct format:**
+   ```bash
+   CHROMA_HOST=chroma-gjdq.railway.internal
+   CHROMA_PORT=<PORT_FROM_RAILWAY_PRIVATE_NETWORKING>  # NOT necessarily 8000!
+   CHROMA_SSL=false
+   ```
+   
+   **Common mistakes:**
+   - Using port 8000 when Railway assigns a different internal port
+   - Not enabling private networking on BOTH services
+   - Using just the service name without `.railway.internal`
+   - Services not in the same Railway project
 
 4. **Custom Embedding Issues**
    - Check Environment Variables: Ensure `EMBEDDINGS_API_URL` and `EMBEDDING_MODEL` are set
