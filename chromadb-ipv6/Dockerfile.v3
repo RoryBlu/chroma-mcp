@@ -1,0 +1,25 @@
+# ChromaDB with IPv6 support for Railway - Version 3
+FROM ghcr.io/chroma-core/chroma:latest
+
+# The original ChromaDB image uses an entrypoint, we need to work with it
+# Based on ChromaDB's docker setup, the server is started with the chroma command
+
+USER root
+
+# Create our wrapper script that will be called by the chroma entrypoint
+RUN mkdir -p /docker_entrypoint && \
+    echo '#!/bin/bash' > /docker_entrypoint/run.sh && \
+    echo 'echo "=== ChromaDB IPv6 Starting ===="' >> /docker_entrypoint/run.sh && \
+    echo 'echo "Railway Private Domain: ${RAILWAY_PRIVATE_DOMAIN}"' >> /docker_entrypoint/run.sh && \
+    echo 'echo "Port: ${PORT:-8000}"' >> /docker_entrypoint/run.sh && \
+    echo 'echo "Starting ChromaDB..."' >> /docker_entrypoint/run.sh && \
+    echo 'cd /chroma' >> /docker_entrypoint/run.sh && \
+    echo 'exec uvicorn chromadb.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${CHROMA_WORKERS:-1} --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive ${CHROMA_TIMEOUT_KEEP_ALIVE:-30}' >> /docker_entrypoint/run.sh && \
+    chmod +x /docker_entrypoint/run.sh
+
+# Switch back to chroma user
+USER chroma
+
+# Override both ENTRYPOINT and CMD
+ENTRYPOINT []
+CMD ["/docker_entrypoint/run.sh"]
