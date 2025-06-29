@@ -1,12 +1,17 @@
-# ChromaDB with IPv6 support for Railway - Simple version
+# ChromaDB with IPv6 support for Railway
 FROM ghcr.io/chroma-core/chroma:latest
 
-# Create a simple wrapper script
+# Stay as root for debugging
 USER root
+
+# Install debugging tools
+RUN apt-get update && apt-get install -y net-tools iputils-ping && rm -rf /var/lib/apt/lists/*
+
+# Copy our start script
 COPY start-chromadb.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/start-chromadb.sh
-USER chroma
 
 EXPOSE 8000
 
+# Run as root for now to debug
 CMD ["/usr/local/bin/start-chromadb.sh"]

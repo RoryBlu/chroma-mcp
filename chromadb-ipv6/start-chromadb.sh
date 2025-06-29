@@ -1,12 +1,22 @@
 #!/bin/bash
 set -e
 
-# Start ChromaDB with :: (all IPv6 interfaces) which should also bind to IPv4
-# The :: address is the IPv6 equivalent of 0.0.0.0 and on most systems will bind to both IPv4 and IPv6
-exec uvicorn chromadb.app:app \
-    --host :: \
-    --port 8000 \
-    --workers 1 \
-    --proxy-headers \
-    --log-config chromadb/log_config.yml \
-    --timeout-keep-alive 30
+echo "=== ChromaDB IPv6 Debug Info ==="
+echo "Hostname: $(hostname)"
+echo "Network interfaces:"
+ip addr show
+echo "================================"
+
+# For Railway, we need to listen on the PORT environment variable if set
+PORT=${PORT:-8000}
+echo "Using port: $PORT"
+
+# Start ChromaDB
+# Using 0.0.0.0 should bind to all available interfaces
+echo "Starting ChromaDB server on 0.0.0.0:$PORT..."
+
+# Check if we're in the right directory
+cd /chroma || cd /app || cd /
+
+# Start ChromaDB using the same command as the original container
+exec python -m chromadb.cli.cli run --host 0.0.0.0 --port $PORT --path /chroma/chroma --log-config chromadb/log_config.yml
