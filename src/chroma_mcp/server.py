@@ -163,6 +163,13 @@ def get_chroma_client(args=None):
                     # ChromaDB HttpClient requires a port
                     client_kwargs["port"] = 8000
                 
+                # Debug logging
+                print(f"Connecting to ChromaDB:")
+                print(f"  Host: {client_kwargs['host']}")
+                print(f"  Port: {client_kwargs['port']}")
+                print(f"  SSL: {client_kwargs['ssl']}")
+                print(f"  Auth: {'Yes' if args.custom_auth_credentials else 'No'}")
+                
                 _chroma_client = chromadb.HttpClient(**client_kwargs)
             except ssl.SSLError as e:
                 print(f"SSL connection failed: {str(e)}")
