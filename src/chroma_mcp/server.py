@@ -156,12 +156,11 @@ def get_chroma_client(args=None):
                 }
                 
                 # Handle port configuration
-                # For Railway private networking with .railway.internal hosts, 
-                # we might not need a port as Railway handles routing
                 if args.port:
                     client_kwargs["port"] = int(args.port)
-                elif not (args.host and '.railway.internal' in args.host):
-                    # Only default to 8000 if NOT using Railway internal networking
+                else:
+                    # Default to 8000 if no port specified
+                    # ChromaDB HttpClient requires a port
                     client_kwargs["port"] = 8000
                 
                 _chroma_client = chromadb.HttpClient(**client_kwargs)
