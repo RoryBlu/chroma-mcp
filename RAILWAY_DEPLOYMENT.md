@@ -67,8 +67,11 @@ Before setting environment variables, you MUST enable private networking:
 # Chroma Configuration (HTTP client to external server)
 CHROMA_CLIENT_TYPE=http
 CHROMA_HOST=chroma-gjdq.railway.internal
-CHROMA_PORT=<PORT FROM CHROMA SERVER's PRIVATE NETWORKING SETTINGS>
+CHROMA_PORT=8000
 CHROMA_SSL=false
+
+# Authentication (if your Chroma server has auth enabled)
+CHROMA_CUSTOM_AUTH_CREDENTIALS=gi9v25dw33k086falw1c1i5m55b2uynt
 
 # Custom Embedding API Configuration (Base Config)
 EMBEDDINGS_API_URL=https://embeddings-development.up.railway.app
