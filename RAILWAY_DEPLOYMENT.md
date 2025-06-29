@@ -67,7 +67,7 @@ Before setting environment variables, you MUST enable private networking:
 # Chroma Configuration (HTTP client to external server)
 CHROMA_CLIENT_TYPE=http
 CHROMA_HOST=chroma-gjdq.railway.internal
-CHROMA_PORT=8000
+CHROMA_PORT=8080
 CHROMA_SSL=false
 
 # Authentication (if your Chroma server has auth enabled)

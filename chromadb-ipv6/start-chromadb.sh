@@ -31,20 +31,32 @@ echo "  Auth Provider: ${CHROMA_SERVER_AUTHN_PROVIDER}"
 echo "  Python: $(which python)"
 echo "  PWD: $(pwd)"
 
-# Check if we can find uvicorn
-if command -v uvicorn &> /dev/null; then
-    echo "  Uvicorn: $(which uvicorn)"
-else
-    echo "  Uvicorn: Not found in PATH, checking Python module..."
+# Find Python executable
+PYTHON_CMD=""
+for cmd in python3 python python3.11 python3.10 python3.9; do
+    if command -v $cmd &> /dev/null; then
+        PYTHON_CMD=$cmd
+        echo "  Python: $(which $cmd)"
+        break
+    fi
+done
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: No Python interpreter found!"
+    echo "PATH=$PATH"
+    ls -la /usr/bin/python* 2>/dev/null || true
+    ls -la /usr/local/bin/python* 2>/dev/null || true
+    exit 1
 fi
 
 # Ensure we're in the right directory
 cd /chroma 2>/dev/null || true
 
 echo "Starting ChromaDB server..."
+echo "Command: $PYTHON_CMD -m uvicorn chromadb.app:app --host $HOST --port $PORT"
 
 # Start ChromaDB using Python module to ensure we use the right environment
-exec python -m uvicorn chromadb.app:app \
+exec $PYTHON_CMD -m uvicorn chromadb.app:app \
     --host "$HOST" \
     --port "$PORT" \
     --workers "$WORKERS" \
