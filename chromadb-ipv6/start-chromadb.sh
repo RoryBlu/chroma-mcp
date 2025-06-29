@@ -42,11 +42,29 @@ for cmd in python3 python python3.11 python3.10 python3.9; do
 done
 
 if [ -z "$PYTHON_CMD" ]; then
-    echo "ERROR: No Python interpreter found!"
+    echo "ERROR: No Python interpreter found in PATH!"
     echo "PATH=$PATH"
-    ls -la /usr/bin/python* 2>/dev/null || true
-    ls -la /usr/local/bin/python* 2>/dev/null || true
-    exit 1
+    echo "Searching for Python in common locations..."
+    
+    # Search for Python in common locations
+    for dir in /usr/bin /usr/local/bin /opt/python/bin /app/.venv/bin /venv/bin; do
+        echo "Checking $dir..."
+        if [ -d "$dir" ]; then
+            ls -la $dir/python* 2>/dev/null || true
+        fi
+    done
+    
+    # Check if we're in a virtual environment
+    if [ -f "/chroma/bin/python" ]; then
+        PYTHON_CMD="/chroma/bin/python"
+        echo "Found Python in /chroma/bin/python"
+    elif [ -f "/.venv/bin/python" ]; then
+        PYTHON_CMD="/.venv/bin/python"
+        echo "Found Python in /.venv/bin/python"
+    else
+        echo "Could not find Python executable!"
+        exit 1
+    fi
 fi
 
 # Ensure we're in the right directory
