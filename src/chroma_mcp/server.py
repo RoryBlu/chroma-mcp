@@ -148,12 +148,20 @@ def get_chroma_client(args=None):
             
             # Handle SSL configuration
             try:
-                _chroma_client = chromadb.HttpClient(
-                    host=args.host,
-                    port=args.port if args.port else None,
-                    ssl=args.ssl,
-                    settings=settings
-                )
+                # Prepare kwargs for HttpClient
+                client_kwargs = {
+                    "host": args.host,
+                    "ssl": args.ssl,
+                    "settings": settings
+                }
+                
+                # Add port - default to 8000 if not provided (Chroma's default)
+                if args.port:
+                    client_kwargs["port"] = int(args.port)
+                else:
+                    client_kwargs["port"] = 8000
+                
+                _chroma_client = chromadb.HttpClient(**client_kwargs)
             except ssl.SSLError as e:
                 print(f"SSL connection failed: {str(e)}")
                 raise
