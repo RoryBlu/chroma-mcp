@@ -1,0 +1,14 @@
+# ChromaDB with IPv6 support and persistence for Railway
+FROM ghcr.io/chroma-core/chroma:latest
+
+# Create the persist directory with proper permissions
+RUN mkdir -p /chroma-data && \
+    chown -R 1000:1000 /chroma-data
+
+# Set the persist directory
+ENV PERSIST_DIRECTORY=/chroma-data
+ENV IS_PERSISTENT=TRUE
+
+# The ChromaDB image has ENTRYPOINT ["chroma"]
+# We need to use the "run" subcommand with proper arguments
+CMD ["run", "--host", "::", "--port", "8000", "--path", "/chroma-data"]

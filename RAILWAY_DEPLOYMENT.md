@@ -70,6 +70,12 @@ CHROMA_HOST=chroma-gjdq.railway.internal
 CHROMA_PORT=8080
 CHROMA_SSL=false
 
+# Tenant and Database (IMPORTANT: Must match your existing data!)
+# If you previously used sparkjar-crew or other tools, they may have used specific values
+# Default ChromaDB uses: tenant="default_tenant", database="default_database"
+CHROMA_TENANT=default_tenant
+CHROMA_DATABASE=default_database
+
 # Authentication (if your Chroma server has auth enabled)
 CHROMA_CUSTOM_AUTH_CREDENTIALS=gi9v25dw33k086falw1c1i5m55b2uynt
 

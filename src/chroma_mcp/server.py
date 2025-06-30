@@ -163,12 +163,21 @@ def get_chroma_client(args=None):
                     # ChromaDB HttpClient requires a port
                     client_kwargs["port"] = 8000
                 
+                # Add tenant and database if specified
+                # These are optional for HTTP client but critical for accessing the right data
+                if args.tenant:
+                    client_kwargs["tenant"] = args.tenant
+                if args.database:
+                    client_kwargs["database"] = args.database
+                
                 # Debug logging
                 print(f"Connecting to ChromaDB:")
                 print(f"  Host: {client_kwargs['host']}")
                 print(f"  Port: {client_kwargs['port']}")
                 print(f"  SSL: {client_kwargs['ssl']}")
                 print(f"  Auth: {'Yes' if args.custom_auth_credentials else 'No'}")
+                print(f"  Tenant: {client_kwargs.get('tenant', 'default_tenant')}")
+                print(f"  Database: {client_kwargs.get('database', 'default_database')}")
                 
                 # Handle IPv6 connectivity for Railway and other environments
                 import socket

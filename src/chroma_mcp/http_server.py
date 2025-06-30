@@ -178,29 +178,32 @@ async def execute_tool(tool_name: str, request: Request):
         
         # Map tool names to functions
         tool_map = {
-            "chroma_list_collections": chroma_list_collections,
+            "chroma_list_collections": lambda: chroma_list_collections(
+                limit=params.get("limit"),
+                offset=params.get("offset")
+            ),
             "chroma_create_collection": lambda: chroma_create_collection(
-                name=params.get("name"),
+                collection_name=params.get("collection_name"),
                 embedding_function_name=params.get("embedding_function_name"),
                 metadata=params.get("metadata")
             ),
             "chroma_peek_collection": lambda: chroma_peek_collection(
-                collection_name=params.get("name"),
+                collection_name=params.get("collection_name"),
                 limit=params.get("limit", 5)
             ),
             "chroma_get_collection_info": lambda: chroma_get_collection_info(
-                collection_name=params.get("name")
+                collection_name=params.get("collection_name")
             ),
             "chroma_get_collection_count": lambda: chroma_get_collection_count(
-                collection_name=params.get("name")
+                collection_name=params.get("collection_name")
             ),
             "chroma_modify_collection": lambda: chroma_modify_collection(
-                name=params.get("name"),
+                collection_name=params.get("collection_name"),
                 new_name=params.get("new_name"),
                 new_metadata=params.get("new_metadata")
             ),
             "chroma_delete_collection": lambda: chroma_delete_collection(
-                collection_name=params.get("name")
+                collection_name=params.get("collection_name")
             ),
             "chroma_add_documents": lambda: chroma_add_documents(
                 collection_name=params.get("collection_name"),
@@ -233,9 +236,7 @@ async def execute_tool(tool_name: str, request: Request):
             ),
             "chroma_delete_documents": lambda: chroma_delete_documents(
                 collection_name=params.get("collection_name"),
-                ids=params.get("ids"),
-                where=params.get("where"),
-                where_document=params.get("where_document")
+                ids=params.get("ids")
             ),
         }
         
@@ -265,7 +266,10 @@ def get_tool_definitions():
             "description": "List all collections in ChromaDB",
             "inputSchema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"}
+                },
                 "required": []
             }
         },
@@ -275,11 +279,11 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    "collection_name": {"type": "string"},
                     "embedding_function_name": {"type": "string"},
                     "metadata": {"type": "object"}
                 },
-                "required": ["name"]
+                "required": ["collection_name"]
             }
         },
         {
@@ -288,10 +292,10 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    "collection_name": {"type": "string"},
                     "limit": {"type": "integer"}
                 },
-                "required": ["name"]
+                "required": ["collection_name"]
             }
         },
         {
@@ -300,9 +304,9 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"}
+                    "collection_name": {"type": "string"}
                 },
-                "required": ["name"]
+                "required": ["collection_name"]
             }
         },
         {
@@ -311,9 +315,9 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"}
+                    "collection_name": {"type": "string"}
                 },
-                "required": ["name"]
+                "required": ["collection_name"]
             }
         },
         {
@@ -322,11 +326,11 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"},
+                    "collection_name": {"type": "string"},
                     "new_name": {"type": "string"},
                     "new_metadata": {"type": "object"}
                 },
-                "required": ["name"]
+                "required": ["collection_name"]
             }
         },
         {
@@ -335,9 +339,9 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string"}
+                    "collection_name": {"type": "string"}
                 },
-                "required": ["name"]
+                "required": ["collection_name"]
             }
         },
         {
@@ -408,11 +412,9 @@ def get_tool_definitions():
                 "type": "object",
                 "properties": {
                     "collection_name": {"type": "string"},
-                    "ids": {"type": "array", "items": {"type": "string"}},
-                    "where": {"type": "object"},
-                    "where_document": {"type": "object"}
+                    "ids": {"type": "array", "items": {"type": "string"}}
                 },
-                "required": ["collection_name"]
+                "required": ["collection_name", "ids"]
             }
         }
     ]
