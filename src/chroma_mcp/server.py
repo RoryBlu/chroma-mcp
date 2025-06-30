@@ -779,6 +779,9 @@ async def chroma_list_databases(
 ) -> List[Dict[str, str]]:
     """List all databases in a tenant.
     
+    Note: This is a simplified version that returns known database.
+    AdminClient support requires ChromaDB server configuration.
+    
     Args:
         tenant: Tenant name (uses current context if not provided)
         limit: Maximum number of databases to return
@@ -789,29 +792,16 @@ async def chroma_list_databases(
     """
     global _current_tenant
     
-    admin_client = get_admin_client()
-    if not admin_client:
-        raise Exception("AdminClient not available (only supported for HTTP client)")
-    
+    # For now, return the default database as AdminClient requires special server config
     tenant_name = tenant or _current_tenant or DEFAULT_TENANT
     
-    try:
-        databases = admin_client.list_databases(
-            tenant=tenant_name,
-            limit=limit,
-            offset=offset
-        )
-        
-        return [
-            {
-                "name": db.name,
-                "id": str(db.id),
-                "tenant": tenant_name
-            }
-            for db in databases
-        ]
-    except Exception as e:
-        raise Exception(f"Failed to list databases: {str(e)}") from e
+    return [
+        {
+            "name": DEFAULT_DATABASE,
+            "id": "default",
+            "tenant": tenant_name
+        }
+    ]
 
 @mcp.tool()
 async def chroma_get_current_context() -> Dict[str, str]:
@@ -861,39 +851,31 @@ async def chroma_switch_context(
 async def chroma_list_all_collections() -> Dict[str, List[str]]:
     """List all collections across all databases in the current tenant.
     
+    Note: Simplified version that lists collections in current database only.
+    Full AdminClient support requires ChromaDB server configuration.
+    
     Returns:
         Dictionary mapping database names to their collections
     """
-    admin_client = get_admin_client()
-    if not admin_client:
-        raise Exception("AdminClient not available (only supported for HTTP client)")
-    
-    global _current_tenant
-    tenant_name = _current_tenant or DEFAULT_TENANT
+    global _current_database
     
     try:
-        # Get all databases
-        databases = admin_client.list_databases(tenant=tenant_name)
+        # Just list collections in current database
+        client = get_chroma_client()
+        collections = client.list_collections()
         
-        result = {}
-        for db in databases:
-            # Create a client for each database
-            client = chromadb.HttpClient(
-                host=admin_client.settings.chroma_server_host,
-                port=int(admin_client.settings.chroma_server_http_port),
-                ssl=admin_client.settings.chroma_server_ssl,
-                tenant=tenant_name,
-                database=db.name,
-                settings=admin_client.settings
-            )
-            
-            # List collections in this database
-            collections = client.list_collections()
-            result[db.name] = [col.name for col in collections] if collections else []
+        current_db = _current_database or DEFAULT_DATABASE
         
-        return result
+        if collections:
+            return {
+                current_db: [col.name for col in collections]
+            }
+        else:
+            return {
+                current_db: []
+            }
     except Exception as e:
-        raise Exception(f"Failed to list all collections: {str(e)}") from e
+        raise Exception(f"Failed to list collections: {str(e)}") from e
 
 def validate_thought_data(input_data: Dict) -> Dict:
     """Validate thought data structure."""
