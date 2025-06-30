@@ -14,10 +14,12 @@ import httpx
 from contextlib import asynccontextmanager
 
 # Configure logging
+import os
+log_file = os.path.join(os.path.expanduser('~'), '.mcp-bridge.log')
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[logging.FileHandler('mcp-bridge.log'), logging.StreamHandler()]
+    handlers=[logging.FileHandler(log_file), logging.StreamHandler(sys.stderr)]
 )
 logger = logging.getLogger(__name__)
 
