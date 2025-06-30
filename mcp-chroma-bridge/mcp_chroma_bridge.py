@@ -114,11 +114,26 @@ class MCPChromaBridge:
             
             # Ensure proper JSON-RPC response format
             if "jsonrpc" not in result:
-                result = {
-                    "jsonrpc": "2.0",
-                    "result": result,
-                    "id": message.get("id")
-                }
+                # For tool calls, wrap the result in content format expected by MCP
+                if message.get("method") == "tools/call":
+                    result = {
+                        "jsonrpc": "2.0",
+                        "result": {
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": json.dumps(result) if not isinstance(result, str) else result
+                                }
+                            ]
+                        },
+                        "id": message.get("id")
+                    }
+                else:
+                    result = {
+                        "jsonrpc": "2.0",
+                        "result": result,
+                        "id": message.get("id")
+                    }
                 
             return result
             
