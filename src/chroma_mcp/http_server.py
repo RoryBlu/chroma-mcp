@@ -174,6 +174,10 @@ async def execute_tool(tool_name: str, request: Request):
             chroma_get_documents,
             chroma_update_documents,
             chroma_delete_documents,
+            chroma_list_databases,
+            chroma_get_current_context,
+            chroma_switch_context,
+            chroma_list_all_collections,
         )
         
         # Map tool names to functions
@@ -238,6 +242,17 @@ async def execute_tool(tool_name: str, request: Request):
                 collection_name=params.get("collection_name"),
                 ids=params.get("ids")
             ),
+            "chroma_list_databases": lambda: chroma_list_databases(
+                tenant=params.get("tenant"),
+                limit=params.get("limit"),
+                offset=params.get("offset")
+            ),
+            "chroma_get_current_context": lambda: chroma_get_current_context(),
+            "chroma_switch_context": lambda: chroma_switch_context(
+                tenant=params.get("tenant"),
+                database=params.get("database")
+            ),
+            "chroma_list_all_collections": lambda: chroma_list_all_collections(),
         }
         
         if tool_name not in tool_map:
@@ -415,6 +430,49 @@ def get_tool_definitions():
                     "ids": {"type": "array", "items": {"type": "string"}}
                 },
                 "required": ["collection_name", "ids"]
+            }
+        },
+        {
+            "name": "chroma_list_databases",
+            "description": "List all databases in a tenant",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tenant": {"type": "string"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"}
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "chroma_get_current_context",
+            "description": "Get the current tenant and database context",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "chroma_switch_context",
+            "description": "Switch the current tenant and/or database context",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "tenant": {"type": "string"},
+                    "database": {"type": "string"}
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "chroma_list_all_collections",
+            "description": "List all collections across all databases in the current tenant",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "required": []
             }
         }
     ]

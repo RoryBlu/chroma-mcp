@@ -8,9 +8,21 @@ import os
 from chromadb.config import Settings
 
 # Configuration
-CHROMA_HOST = os.environ.get('CHROMA_HOST', 'chroma-gjdq.railway.internal')
-CHROMA_PORT = int(os.environ.get('CHROMA_PORT', '8080'))
-CHROMA_SSL = os.environ.get('CHROMA_SSL', 'false').lower() == 'true'
+# Check if we have a public URL first
+CHROMA_PUBLIC_URL = os.environ.get('CHROMA_PUBLIC_URL')
+if CHROMA_PUBLIC_URL:
+    # Parse the public URL
+    from urllib.parse import urlparse
+    parsed = urlparse(CHROMA_PUBLIC_URL)
+    CHROMA_HOST = parsed.hostname
+    CHROMA_PORT = parsed.port or (443 if parsed.scheme == 'https' else 80)
+    CHROMA_SSL = parsed.scheme == 'https'
+else:
+    # Fall back to individual settings
+    CHROMA_HOST = os.environ.get('CHROMA_HOST', 'chroma-gjdq.railway.internal')
+    CHROMA_PORT = int(os.environ.get('CHROMA_PORT', '8080'))
+    CHROMA_SSL = os.environ.get('CHROMA_SSL', 'false').lower() == 'true'
+
 CHROMA_CUSTOM_AUTH_CREDENTIALS = os.environ.get('CHROMA_CUSTOM_AUTH_CREDENTIALS', 'gi9v25dw33k086falw1c1i5m55b2uynt')
 
 # Test different tenant/database combinations

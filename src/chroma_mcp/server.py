@@ -1,11 +1,12 @@
-from typing import Dict, List, TypedDict, Union
+from typing import Dict, List, TypedDict, Union, Optional
 from enum import Enum
 import chromadb
+from chromadb import AdminClient
 from mcp.server.fastmcp import FastMCP
 import os
 from dotenv import load_dotenv
 import argparse
-from chromadb.config import Settings
+from chromadb.config import Settings, DEFAULT_TENANT, DEFAULT_DATABASE
 import ssl
 import uuid
 import time
@@ -83,6 +84,9 @@ mcp = FastMCP("chroma")
 
 # Global variables
 _chroma_client = None
+_admin_client = None
+_current_tenant = None
+_current_database = None
 
 def create_parser():
     """Create and return the argument parser."""
@@ -123,7 +127,7 @@ def create_parser():
 
 def get_chroma_client(args=None):
     """Get or create the global Chroma client instance."""
-    global _chroma_client
+    global _chroma_client, _current_tenant, _current_database
     if _chroma_client is None:
         if args is None:
             # Create parser and parse args if not provided
@@ -163,12 +167,20 @@ def get_chroma_client(args=None):
                     # ChromaDB HttpClient requires a port
                     client_kwargs["port"] = 8000
                 
-                # Add tenant and database if specified
+                # Add tenant and database from current context or args
                 # These are optional for HTTP client but critical for accessing the right data
-                if args.tenant:
-                    client_kwargs["tenant"] = args.tenant
-                if args.database:
-                    client_kwargs["database"] = args.database
+                # Use current context first, then args, then defaults
+                tenant_to_use = _current_tenant or (args.tenant if args.tenant else DEFAULT_TENANT)
+                database_to_use = _current_database or (args.database if args.database else DEFAULT_DATABASE)
+                
+                client_kwargs["tenant"] = tenant_to_use
+                client_kwargs["database"] = database_to_use
+                
+                # Update current context if not set
+                if _current_tenant is None:
+                    _current_tenant = tenant_to_use
+                if _current_database is None:
+                    _current_database = database_to_use
                 
                 # Debug logging
                 print(f"Connecting to ChromaDB:")
@@ -259,6 +271,52 @@ def get_chroma_client(args=None):
             _chroma_client = chromadb.EphemeralClient()
             
     return _chroma_client
+
+def get_admin_client(args=None):
+    """Get or create the global admin client instance."""
+    global _admin_client, _current_tenant, _current_database
+    
+    if _admin_client is None:
+        if args is None:
+            parser = create_parser()
+            args = parser.parse_args()
+        
+        # Load environment variables
+        load_dotenv(dotenv_path=args.dotenv_path)
+        
+        if args.client_type == 'http':
+            if not args.host:
+                raise ValueError("Host must be provided for AdminClient")
+            
+            settings = Settings(
+                chroma_api_impl="chromadb.api.fastapi.FastAPI",
+                chroma_server_host=args.host,
+                chroma_server_http_port=str(args.port) if args.port else "8000",
+                chroma_server_ssl=args.ssl
+            )
+            
+            if args.custom_auth_credentials:
+                settings.chroma_client_auth_provider = "chromadb.auth.basic_authn.BasicAuthClientProvider"
+                settings.chroma_client_auth_credentials = args.custom_auth_credentials
+            
+            try:
+                _admin_client = AdminClient(settings)
+                print("Successfully created AdminClient")
+            except Exception as e:
+                print(f"Failed to create AdminClient: {e}")
+                raise
+        else:
+            # For local/persistent clients, AdminClient might not be supported
+            print("AdminClient is only supported for HTTP client type")
+            return None
+    
+    # Set current context from args or use defaults
+    if _current_tenant is None:
+        _current_tenant = args.tenant if args and args.tenant else DEFAULT_TENANT
+    if _current_database is None:
+        _current_database = args.database if args and args.database else DEFAULT_DATABASE
+    
+    return _admin_client
 
 ##### Collection Tools #####
 
@@ -711,6 +769,132 @@ async def chroma_delete_documents(
         raise Exception(
             f"Failed to delete documents from collection '{collection_name}': {str(e)}"
         ) from e
+
+##### Admin Tools #####
+
+@mcp.tool()
+async def chroma_list_databases(
+    tenant: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None
+) -> List[Dict[str, str]]:
+    """List all databases in a tenant.
+    
+    Args:
+        tenant: Tenant name (uses current context if not provided)
+        limit: Maximum number of databases to return
+        offset: Number of databases to skip
+    
+    Returns:
+        List of database information dictionaries
+    """
+    global _current_tenant
+    
+    admin_client = get_admin_client()
+    if not admin_client:
+        raise Exception("AdminClient not available (only supported for HTTP client)")
+    
+    tenant_name = tenant or _current_tenant or DEFAULT_TENANT
+    
+    try:
+        databases = admin_client.list_databases(
+            tenant=tenant_name,
+            limit=limit,
+            offset=offset
+        )
+        
+        return [
+            {
+                "name": db.name,
+                "id": str(db.id),
+                "tenant": tenant_name
+            }
+            for db in databases
+        ]
+    except Exception as e:
+        raise Exception(f"Failed to list databases: {str(e)}") from e
+
+@mcp.tool()
+async def chroma_get_current_context() -> Dict[str, str]:
+    """Get the current tenant and database context.
+    
+    Returns:
+        Dictionary with current tenant and database
+    """
+    global _current_tenant, _current_database
+    
+    return {
+        "tenant": _current_tenant or DEFAULT_TENANT,
+        "database": _current_database or DEFAULT_DATABASE
+    }
+
+@mcp.tool()
+async def chroma_switch_context(
+    tenant: Optional[str] = None,
+    database: Optional[str] = None
+) -> Dict[str, str]:
+    """Switch the current tenant and/or database context.
+    
+    Args:
+        tenant: New tenant name (optional)
+        database: New database name (optional)
+    
+    Returns:
+        Dictionary with the new context
+    """
+    global _current_tenant, _current_database, _chroma_client
+    
+    # Update context
+    if tenant is not None:
+        _current_tenant = tenant
+    if database is not None:
+        _current_database = database
+    
+    # Clear the client so it gets recreated with new context
+    _chroma_client = None
+    
+    return {
+        "tenant": _current_tenant or DEFAULT_TENANT,
+        "database": _current_database or DEFAULT_DATABASE
+    }
+
+@mcp.tool()
+async def chroma_list_all_collections() -> Dict[str, List[str]]:
+    """List all collections across all databases in the current tenant.
+    
+    Returns:
+        Dictionary mapping database names to their collections
+    """
+    admin_client = get_admin_client()
+    if not admin_client:
+        raise Exception("AdminClient not available (only supported for HTTP client)")
+    
+    global _current_tenant
+    tenant_name = _current_tenant or DEFAULT_TENANT
+    
+    try:
+        # Get all databases
+        databases = admin_client.list_databases(tenant=tenant_name)
+        
+        result = {}
+        for db in databases:
+            # Create a client for each database
+            client = chromadb.HttpClient(
+                host=admin_client.settings.chroma_server_host,
+                port=int(admin_client.settings.chroma_server_http_port),
+                ssl=admin_client.settings.chroma_server_ssl,
+                tenant=tenant_name,
+                database=db.name,
+                settings=admin_client.settings
+            )
+            
+            # List collections in this database
+            collections = client.list_collections()
+            result[db.name] = [col.name for col in collections] if collections else []
+        
+        return result
+    except Exception as e:
+        raise Exception(f"Failed to list all collections: {str(e)}") from e
 
 def validate_thought_data(input_data: Dict) -> Dict:
     """Validate thought data structure."""
