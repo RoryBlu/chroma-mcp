@@ -6,54 +6,53 @@ Provides HTTP endpoints that bridge to the MCP protocol
 import os
 import json
 import asyncio
+import sys
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 import uvicorn
 import logging
 from contextlib import asynccontextmanager
+import argparse
+from dotenv import load_dotenv
 
-# Import the MCP server components
-from .server import (
-    mcp,
-    ChromaClientType,
-    initialize_client,
-    list_collections,
-    get_collection,
-    create_collection,
-    delete_collection,
-    add_documents,
-    query_collection,
-    update_documents,
-    delete_documents,
-    count_collection,
-)
+# Add the parent directory to the path to import server
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global client instance
+# Global variables
 chroma_client = None
+server_instance = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize ChromaDB client on startup"""
-    global chroma_client
+    global chroma_client, server_instance
+    
+    # Load environment variables
+    load_dotenv()
+    
+    # Import server module
+    from chroma_mcp.server import get_chroma_client, create_parser, mcp, main
+    
+    # Create args similar to command line
+    parser = create_parser()
+    args = parser.parse_args([])  # Use defaults and env vars
     
     # Initialize ChromaDB client
-    args = type('Args', (), {
-        'client_type': os.getenv('CHROMA_CLIENT_TYPE', 'http'),
-        'host': os.getenv('CHROMA_HOST', 'localhost'),
-        'port': os.getenv('CHROMA_PORT', '8000'),
-        'ssl': os.getenv('CHROMA_SSL', 'false').lower() == 'true',
-        'auth_type': 'custom' if os.getenv('CHROMA_CUSTOM_AUTH_CREDENTIALS') else None,
-        'auth_provider': None,
-        'path': os.getenv('CHROMA_PATH'),
-    })()
-    
-    chroma_client = initialize_client(args)
-    logger.info("ChromaDB client initialized successfully")
+    try:
+        chroma_client = get_chroma_client(args)
+        logger.info("ChromaDB client initialized successfully")
+        
+        # Initialize the MCP server to register all tools
+        server_instance = mcp
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize ChromaDB client: {e}")
+        raise
     
     yield
     
@@ -107,7 +106,23 @@ async def handle_mcp_request(request: Request):
                 }
             }
         elif method == "tools/list":
-            result = {"tools": get_tool_definitions()}
+            # Get tools from the MCP server
+            tools = []
+            if server_instance and hasattr(server_instance, '_tools'):
+                for tool_name, tool_info in server_instance._tools.items():
+                    tools.append({
+                        "name": tool_name,
+                        "description": tool_info.get('description', ''),
+                        "inputSchema": tool_info.get('params_schema', {
+                            "type": "object",
+                            "properties": {},
+                            "required": []
+                        })
+                    })
+            else:
+                # Fallback to hardcoded tools
+                tools = get_tool_definitions()
+            result = {"tools": tools}
         elif method == "notifications/initialized":
             # Just acknowledge
             return JSONResponse(content={})
@@ -145,48 +160,90 @@ async def execute_tool(tool_name: str, request: Request):
     try:
         params = await request.json()
         
+        # Import the tool functions
+        from chroma_mcp.server import (
+            chroma_list_collections,
+            chroma_create_collection,
+            chroma_peek_collection,
+            chroma_get_collection_info,
+            chroma_get_collection_count,
+            chroma_modify_collection,
+            chroma_delete_collection,
+            chroma_add_documents,
+            chroma_query_documents,
+            chroma_get_documents,
+            chroma_update_documents,
+            chroma_delete_documents,
+        )
+        
         # Map tool names to functions
         tool_map = {
-            "chroma_list_collections": list_collections,
-            "chroma_get_collection": lambda: get_collection(params.get("collection_name")),
-            "chroma_create_collection": lambda: create_collection(
-                params.get("collection_name"),
-                params.get("embedding_function_name"),
-                params.get("metadata")
+            "chroma_list_collections": chroma_list_collections,
+            "chroma_create_collection": lambda: chroma_create_collection(
+                name=params.get("name"),
+                embedding_function_name=params.get("embedding_function_name"),
+                metadata=params.get("metadata")
             ),
-            "chroma_delete_collection": lambda: delete_collection(params.get("collection_name")),
-            "chroma_add_documents": lambda: add_documents(
-                params.get("collection_name"),
-                params.get("documents"),
-                params.get("ids"),
-                params.get("metadatas")
+            "chroma_peek_collection": lambda: chroma_peek_collection(
+                name=params.get("name"),
+                limit=params.get("limit", 5)
             ),
-            "chroma_query_collection": lambda: query_collection(
-                params.get("collection_name"),
-                params.get("query_texts"),
-                params.get("n_results"),
-                params.get("where"),
-                params.get("where_document")
+            "chroma_get_collection_info": lambda: chroma_get_collection_info(
+                name=params.get("name")
             ),
-            "chroma_update_documents": lambda: update_documents(
-                params.get("collection_name"),
-                params.get("ids"),
-                params.get("documents"),
-                params.get("metadatas")
+            "chroma_get_collection_count": lambda: chroma_get_collection_count(
+                name=params.get("name")
             ),
-            "chroma_delete_documents": lambda: delete_documents(
-                params.get("collection_name"),
-                params.get("ids"),
-                params.get("where")
+            "chroma_modify_collection": lambda: chroma_modify_collection(
+                name=params.get("name"),
+                new_name=params.get("new_name"),
+                new_metadata=params.get("new_metadata")
             ),
-            "chroma_count_collection": lambda: count_collection(params.get("collection_name")),
+            "chroma_delete_collection": lambda: chroma_delete_collection(
+                name=params.get("name")
+            ),
+            "chroma_add_documents": lambda: chroma_add_documents(
+                collection_name=params.get("collection_name"),
+                documents=params.get("documents"),
+                ids=params.get("ids"),
+                metadatas=params.get("metadatas")
+            ),
+            "chroma_query_documents": lambda: chroma_query_documents(
+                collection_name=params.get("collection_name"),
+                query_texts=params.get("query_texts"),
+                n_results=params.get("n_results", 10),
+                where=params.get("where"),
+                where_document=params.get("where_document"),
+                include=params.get("include")
+            ),
+            "chroma_get_documents": lambda: chroma_get_documents(
+                collection_name=params.get("collection_name"),
+                ids=params.get("ids"),
+                where=params.get("where"),
+                limit=params.get("limit"),
+                offset=params.get("offset"),
+                where_document=params.get("where_document"),
+                include=params.get("include")
+            ),
+            "chroma_update_documents": lambda: chroma_update_documents(
+                collection_name=params.get("collection_name"),
+                ids=params.get("ids"),
+                documents=params.get("documents"),
+                metadatas=params.get("metadatas")
+            ),
+            "chroma_delete_documents": lambda: chroma_delete_documents(
+                collection_name=params.get("collection_name"),
+                ids=params.get("ids"),
+                where=params.get("where"),
+                where_document=params.get("where_document")
+            ),
         }
         
         if tool_name not in tool_map:
             raise HTTPException(status_code=404, detail=f"Tool not found: {tool_name}")
         
         # Execute the tool
-        result = tool_map[tool_name]()
+        result = await tool_map[tool_name]()
         
         return {"result": result}
         
@@ -217,22 +274,58 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "collection_name": {"type": "string"},
+                    "name": {"type": "string"},
                     "embedding_function_name": {"type": "string"},
                     "metadata": {"type": "object"}
                 },
-                "required": ["collection_name"]
+                "required": ["name"]
             }
         },
         {
-            "name": "chroma_get_collection",
-            "description": "Get details about a specific collection",
+            "name": "chroma_peek_collection",
+            "description": "Peek at documents in a collection",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "collection_name": {"type": "string"}
+                    "name": {"type": "string"},
+                    "limit": {"type": "integer"}
                 },
-                "required": ["collection_name"]
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "chroma_get_collection_info",
+            "description": "Get detailed information about a collection",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"}
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "chroma_get_collection_count",
+            "description": "Get the number of documents in a collection",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"}
+                },
+                "required": ["name"]
+            }
+        },
+        {
+            "name": "chroma_modify_collection",
+            "description": "Modify a collection's name or metadata",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "new_name": {"type": "string"},
+                    "new_metadata": {"type": "object"}
+                },
+                "required": ["name"]
             }
         },
         {
@@ -241,9 +334,9 @@ def get_tool_definitions():
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "collection_name": {"type": "string"}
+                    "name": {"type": "string"}
                 },
-                "required": ["collection_name"]
+                "required": ["name"]
             }
         },
         {
@@ -261,7 +354,7 @@ def get_tool_definitions():
             }
         },
         {
-            "name": "chroma_query_collection",
+            "name": "chroma_query_documents",
             "description": "Query documents in a collection",
             "inputSchema": {
                 "type": "object",
@@ -270,9 +363,27 @@ def get_tool_definitions():
                     "query_texts": {"type": "array", "items": {"type": "string"}},
                     "n_results": {"type": "integer"},
                     "where": {"type": "object"},
-                    "where_document": {"type": "object"}
+                    "where_document": {"type": "object"},
+                    "include": {"type": "array", "items": {"type": "string"}}
                 },
                 "required": ["collection_name", "query_texts"]
+            }
+        },
+        {
+            "name": "chroma_get_documents",
+            "description": "Get documents from a collection",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "collection_name": {"type": "string"},
+                    "ids": {"type": "array", "items": {"type": "string"}},
+                    "where": {"type": "object"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"},
+                    "where_document": {"type": "object"},
+                    "include": {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["collection_name"]
             }
         },
         {
@@ -297,18 +408,8 @@ def get_tool_definitions():
                 "properties": {
                     "collection_name": {"type": "string"},
                     "ids": {"type": "array", "items": {"type": "string"}},
-                    "where": {"type": "object"}
-                },
-                "required": ["collection_name"]
-            }
-        },
-        {
-            "name": "chroma_count_collection",
-            "description": "Count documents in a collection",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "collection_name": {"type": "string"}
+                    "where": {"type": "object"},
+                    "where_document": {"type": "object"}
                 },
                 "required": ["collection_name"]
             }
