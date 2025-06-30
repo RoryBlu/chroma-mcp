@@ -245,7 +245,8 @@ async def execute_tool(tool_name: str, request: Request):
         # Execute the tool
         result = await tool_map[tool_name]()
         
-        return {"result": result}
+        # Return raw result - the bridge will wrap it in JSON-RPC format
+        return result
         
     except Exception as e:
         logger.error(f"Error executing tool {tool_name}: {e}")
