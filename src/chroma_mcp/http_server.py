@@ -185,14 +185,14 @@ async def execute_tool(tool_name: str, request: Request):
                 metadata=params.get("metadata")
             ),
             "chroma_peek_collection": lambda: chroma_peek_collection(
-                name=params.get("name"),
+                collection_name=params.get("name"),
                 limit=params.get("limit", 5)
             ),
             "chroma_get_collection_info": lambda: chroma_get_collection_info(
-                name=params.get("name")
+                collection_name=params.get("name")
             ),
             "chroma_get_collection_count": lambda: chroma_get_collection_count(
-                name=params.get("name")
+                collection_name=params.get("name")
             ),
             "chroma_modify_collection": lambda: chroma_modify_collection(
                 name=params.get("name"),
@@ -200,7 +200,7 @@ async def execute_tool(tool_name: str, request: Request):
                 new_metadata=params.get("new_metadata")
             ),
             "chroma_delete_collection": lambda: chroma_delete_collection(
-                name=params.get("name")
+                collection_name=params.get("name")
             ),
             "chroma_add_documents": lambda: chroma_add_documents(
                 collection_name=params.get("collection_name"),
