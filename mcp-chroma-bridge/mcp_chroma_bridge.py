@@ -326,6 +326,49 @@ class MCPChromaBridge:
                     },
                     "required": ["collection_name"]
                 }
+            },
+            {
+                "name": "chroma_list_databases",
+                "description": "List all databases in a tenant",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "tenant": {"type": "string"},
+                        "limit": {"type": "integer"},
+                        "offset": {"type": "integer"}
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "chroma_get_current_context",
+                "description": "Get the current tenant and database context",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "chroma_switch_context",
+                "description": "Switch the current tenant and/or database context",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "tenant": {"type": "string"},
+                        "database": {"type": "string"}
+                    },
+                    "required": []
+                }
+            },
+            {
+                "name": "chroma_list_all_collections",
+                "description": "List all collections across all databases in the current tenant",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
             }
         ]
         

@@ -291,8 +291,7 @@ def get_admin_client(args=None):
             settings = Settings(
                 chroma_api_impl="chromadb.api.fastapi.FastAPI",
                 chroma_server_host=args.host,
-                chroma_server_http_port=str(args.port) if args.port else "8000",
-                chroma_server_ssl=args.ssl
+                chroma_server_http_port=str(args.port) if args.port else "8000"
             )
             
             if args.custom_auth_credentials:
