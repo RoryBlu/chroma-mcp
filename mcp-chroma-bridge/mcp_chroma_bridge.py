@@ -41,23 +41,8 @@ class MCPChromaBridge:
             headers=self._get_headers()
         )
         
-        # Send initialization message
-        await self._send_message({
-            "jsonrpc": "2.0",
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "0.1.0",
-                "capabilities": {
-                    "tools": True,
-                    "resources": True
-                },
-                "clientInfo": {
-                    "name": "mcp-chroma-bridge",
-                    "version": "1.0.0"
-                }
-            },
-            "id": 1
-        })
+        # Don't send initialization - wait for Claude to initialize
+        logger.info("Bridge ready, waiting for initialization from Claude...")
         
         # Start processing messages
         await self._process_messages()
@@ -77,7 +62,7 @@ class MCPChromaBridge:
         output = json.dumps(message) + "\n"
         sys.stdout.write(output)
         sys.stdout.flush()
-        logger.debug(f"Sent: {message}")
+        logger.info(f"Sent: {message}")
         
     async def _read_message(self) -> Optional[Dict[str, Any]]:
         """Read a message from stdin"""
@@ -86,7 +71,7 @@ class MCPChromaBridge:
             if not line:
                 return None
             message = json.loads(line.strip())
-            logger.debug(f"Received: {message}")
+            logger.info(f"Received: {message}")
             return message
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse message: {e}")
@@ -161,41 +146,47 @@ class MCPChromaBridge:
             
     async def _process_messages(self):
         """Main message processing loop"""
-        while True:
-            message = await self._read_message()
-            if message is None:
-                break
+        try:
+            while True:
+                message = await self._read_message()
+                if message is None:
+                    logger.info("No more messages, exiting...")
+                    break
+                    
+                logger.info(f"Processing message: {message}")
                 
-            # Handle special cases locally
-            if message.get("method") == "initialize":
-                # We already initialized, just respond
-                await self._send_message({
-                    "jsonrpc": "2.0",
-                    "result": {
-                        "protocolVersion": "0.1.0",
-                        "capabilities": {
-                            "tools": True,
-                            "resources": True
+                # Handle special cases locally
+                if message.get("method") == "initialize":
+                    # Respond with the protocol version Claude Desktop expects
+                    protocol_version = message.get("params", {}).get("protocolVersion", "2024-11-05")
+                    await self._send_message({
+                        "jsonrpc": "2.0",
+                        "result": {
+                            "protocolVersion": protocol_version,
+                            "capabilities": {
+                                "tools": {}
+                            },
+                            "serverInfo": {
+                                "name": "mcp-chroma-bridge",
+                                "version": "1.0.0"
+                            }
                         },
-                        "serverInfo": {
-                            "name": "mcp-chroma-bridge",
-                            "version": "1.0.0"
-                        }
-                    },
-                    "id": message.get("id")
-                })
-            elif message.get("method") == "tools/list":
-                # Get tool list from remote
-                tools = await self._get_remote_tools()
-                await self._send_message({
-                    "jsonrpc": "2.0",
-                    "result": {"tools": tools},
-                    "id": message.get("id")
-                })
-            else:
-                # Forward everything else
-                response = await self._forward_to_remote(message)
-                await self._send_message(response)
+                        "id": message.get("id")
+                    })
+                elif message.get("method") == "tools/list":
+                    # Get tool list from remote
+                    tools = await self._get_remote_tools()
+                    await self._send_message({
+                        "jsonrpc": "2.0",
+                        "result": {"tools": tools},
+                        "id": message.get("id")
+                    })
+                else:
+                    # Forward everything else
+                    response = await self._forward_to_remote(message)
+                    await self._send_message(response)
+        except Exception as e:
+            logger.error(f"Error in message processing: {e}", exc_info=True)
                 
     async def _get_remote_tools(self) -> list:
         """Get the list of available tools from remote server"""
