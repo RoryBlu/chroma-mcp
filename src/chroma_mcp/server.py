@@ -2,7 +2,6 @@ from typing import Dict, List, Union, Optional
 from typing_extensions import TypedDict
 from enum import Enum
 import chromadb
-from chromadb.admin import AdminClient
 from mcp.server.fastmcp import FastMCP
 import os
 from dotenv import load_dotenv
@@ -32,6 +31,29 @@ from chromadb.utils.embedding_functions import (
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Try to import AdminClient - location varies by ChromaDB version
+ADMIN_CLIENT_AVAILABLE = False
+AdminClient = None
+
+try:
+    # Try newer ChromaDB versions first
+    from chromadb import AdminClient
+    ADMIN_CLIENT_AVAILABLE = True
+except ImportError:
+    try:
+        # Try older import path
+        from chromadb.admin import AdminClient
+        ADMIN_CLIENT_AVAILABLE = True
+    except ImportError:
+        try:
+            # Try another possible location
+            from chromadb.api.admin import AdminClient
+            ADMIN_CLIENT_AVAILABLE = True
+        except ImportError:
+            # AdminClient not available in this version
+            logger.info("AdminClient not available in this ChromaDB version - admin functions will use fallback mode")
+            pass
 
 class CustomEmbeddingFunction(EmbeddingFunction):
     """Custom embedding function that uses an HTTP API endpoint."""
@@ -238,6 +260,11 @@ def get_or_create_admin_client(args=None):
     """Get or create AdminClient, returns None if not available."""
     global _admin_client
     
+    # Check if AdminClient is available in this ChromaDB version
+    if not ADMIN_CLIENT_AVAILABLE:
+        logger.debug("AdminClient not available in this ChromaDB version")
+        return None
+    
     if _admin_client is not None:
         return _admin_client
     
@@ -255,17 +282,32 @@ def get_or_create_admin_client(args=None):
         return None
     
     try:
-        # AdminClient uses Settings differently than HttpClient
+        # AdminClient configuration
         settings = Settings()
         settings.chroma_server_host = args.host
         settings.chroma_server_http_port = str(args.port) if args.port else "8000"
         
         if args.ssl:
             settings.chroma_server_ssl_enabled = True
-            
-        if args.custom_auth_credentials:
-            settings.chroma_server_auth_credentials = args.custom_auth_credentials
-            settings.chroma_server_auth_provider = "chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
+        
+        # Handle authentication - support both token and basic auth
+        auth_token = args.custom_auth_credentials or os.getenv('CHROMA_AUTH_TOKEN')
+        auth_provider = os.getenv('CHROMA_SERVER_AUTHN_PROVIDER', '')
+        
+        if auth_token:
+            if 'token' in auth_provider.lower():
+                # Token authentication (Railway setup)
+                settings.chroma_client_auth_provider = "chromadb.auth.token_authn.TokenAuthClientProvider"
+                settings.chroma_client_auth_credentials = auth_token
+                settings.chroma_client_auth_token_transport_header = os.getenv(
+                    'CHROMA_AUTH_TOKEN_TRANSPORT_HEADER', 'Authorization'
+                )
+                logger.info("Using token authentication for AdminClient")
+            else:
+                # Basic authentication (default)
+                settings.chroma_client_auth_provider = "chromadb.auth.basic_authn.BasicAuthClientProvider"
+                settings.chroma_client_auth_credentials = auth_token
+                logger.info("Using basic authentication for AdminClient")
         
         _admin_client = AdminClient(settings)
         logger.info("Successfully created AdminClient")
