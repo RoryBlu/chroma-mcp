@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 chroma_client = None
 server_instance = None
 
+def normalize_error_message(error: Exception) -> str:
+    """Ensure error messages are never empty."""
+    return str(error) or f"{type(error).__name__}: Unknown error occurred"
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize ChromaDB client on startup"""
@@ -82,7 +86,7 @@ async def health():
         else:
             return {"status": "unhealthy", "chromadb": "not initialized"}
     except Exception as e:
-        return {"status": "unhealthy", "chromadb": "error", "error": str(e)}
+        return {"status": "unhealthy", "chromadb": "error", "error": normalize_error_message(e)}
 
 @app.post("/mcp")
 async def handle_mcp_request(request: Request):
@@ -149,7 +153,7 @@ async def handle_mcp_request(request: Request):
             "jsonrpc": "2.0",
             "error": {
                 "code": -32603,
-                "message": f"Internal error: {str(e)}"
+                "message": f"Internal error: {normalize_error_message(e)}"
             },
             "id": message.get("id") if 'message' in locals() else None
         }
@@ -174,10 +178,11 @@ async def execute_tool(tool_name: str, request: Request):
             chroma_get_documents,
             chroma_update_documents,
             chroma_delete_documents,
-            chroma_list_databases,
             chroma_get_current_context,
             chroma_switch_context,
-            chroma_list_all_collections,
+            chroma_list_databases,
+            chroma_create_database,
+            chroma_delete_database,
         )
         
         # Map tool names to functions
@@ -242,17 +247,24 @@ async def execute_tool(tool_name: str, request: Request):
                 collection_name=params.get("collection_name"),
                 ids=params.get("ids")
             ),
-            "chroma_list_databases": lambda: chroma_list_databases(
-                tenant=params.get("tenant"),
-                limit=params.get("limit"),
-                offset=params.get("offset")
-            ),
             "chroma_get_current_context": lambda: chroma_get_current_context(),
             "chroma_switch_context": lambda: chroma_switch_context(
                 tenant=params.get("tenant"),
                 database=params.get("database")
             ),
-            "chroma_list_all_collections": lambda: chroma_list_all_collections(),
+            "chroma_list_databases": lambda: chroma_list_databases(
+                tenant=params.get("tenant"),
+                limit=params.get("limit"),
+                offset=params.get("offset")
+            ),
+            "chroma_create_database": lambda: chroma_create_database(
+                database=params.get("database"),
+                tenant=params.get("tenant")
+            ),
+            "chroma_delete_database": lambda: chroma_delete_database(
+                database=params.get("database"),
+                tenant=params.get("tenant")
+            ),
         }
         
         if tool_name not in tool_map:
@@ -266,7 +278,7 @@ async def execute_tool(tool_name: str, request: Request):
         
     except Exception as e:
         logger.error(f"Error executing tool {tool_name}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=normalize_error_message(e))
 
 @app.get("/tools")
 async def list_tools():
@@ -433,19 +445,6 @@ def get_tool_definitions():
             }
         },
         {
-            "name": "chroma_list_databases",
-            "description": "List all databases in a tenant",
-            "inputSchema": {
-                "type": "object",
-                "properties": {
-                    "tenant": {"type": "string"},
-                    "limit": {"type": "integer"},
-                    "offset": {"type": "integer"}
-                },
-                "required": []
-            }
-        },
-        {
             "name": "chroma_get_current_context",
             "description": "Get the current tenant and database context",
             "inputSchema": {
@@ -467,12 +466,40 @@ def get_tool_definitions():
             }
         },
         {
-            "name": "chroma_list_all_collections",
-            "description": "List all collections across all databases in the current tenant",
+            "name": "chroma_list_databases",
+            "description": "List databases in a tenant",
             "inputSchema": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "tenant": {"type": "string"},
+                    "limit": {"type": "integer"},
+                    "offset": {"type": "integer"}
+                },
                 "required": []
+            }
+        },
+        {
+            "name": "chroma_create_database",
+            "description": "Create a new database in a tenant",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "database": {"type": "string"},
+                    "tenant": {"type": "string"}
+                },
+                "required": ["database"]
+            }
+        },
+        {
+            "name": "chroma_delete_database",
+            "description": "Delete a database from a tenant",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "database": {"type": "string"},
+                    "tenant": {"type": "string"}
+                },
+                "required": ["database"]
             }
         }
     ]

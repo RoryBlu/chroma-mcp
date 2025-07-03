@@ -1,15 +1,15 @@
-# Claude Code Instructions: Add Custom Embedding API Support to Chroma MCP
+# Claude Code Instructions: Custom Embedding API Support in Chroma MCP
 
 ## Overview
-Modify Chroma MCP to support custom embedding API endpoints that don't require authentication. The current implementation only supports predefined providers (OpenAI, Cohere, etc.). We need to add support for arbitrary HTTP embedding endpoints.
+Custom embedding API support has been implemented in Chroma MCP. This feature allows using arbitrary HTTP embedding endpoints that don't require authentication by configuring environment variables. The implementation is located in `src/chroma_mcp/server.py`.
 
-## Requirements
+## Current Implementation
 
-### Environment Variables to Support
-The implementation should recognize these environment variables:
-- `EMBEDDINGS_API_URL` - The full URL endpoint for the custom embeddings service
+### Environment Variables
+The implementation recognizes these environment variables:
+- `EMBEDDINGS_API_URL` - The full URL endpoint for the custom embeddings service (automatically appends `/embeddings` if not present)
 - `EMBEDDING_MODEL` - The model name to use (passed to the API)
-- `EMBEDDING_DIMENSION` - The vector dimension size (for validation)
+- `EMBEDDING_DIMENSION` - The vector dimension size (used for validation)
 
 Example values:
 ```bash
@@ -18,32 +18,24 @@ EMBEDDING_MODEL=Alibaba-NLP/gte-multilingual-base
 EMBEDDING_DIMENSION=768
 ```
 
-## Implementation Steps
+### Implementation Details
 
-### 1. Create Custom Embedding Function Class
+1. **CustomEmbeddingFunction Class** (lines 32-81 in `src/chroma_mcp/server.py`):
+   - Inherits from Chroma's `EmbeddingFunction` protocol
+   - Reads environment variables on initialization
+   - Makes HTTP POST requests using httpx
+   - Validates embedding dimensions match the configured value
+   - Handles errors gracefully (connection errors, HTTP errors, invalid responses)
 
-Create a new embedding function class that:
-- Inherits from Chroma's `EmbeddingFunction` protocol
-- Reads the custom environment variables
-- Makes HTTP POST requests to the custom API endpoint
-- Handles batch processing of documents
-- Returns embeddings in the format Chroma expects
+2. **Registration and Configuration** (lines 357-369):
+   - `_register_custom_embedding_if_available()` checks for custom embedding environment variables
+   - Registers `CustomEmbeddingFunction` as "custom" when variables are set
+   - `_get_default_embedding_function()` returns "custom" as default when configured
 
-The class should:
-- Check if all required environment variables are set
-- Validate that returned embeddings match the expected dimension
-- Handle API errors gracefully
-- Support batch embedding of multiple documents
+3. **Integration** (line 141):
+   - Called in `get_chroma_client()` to ensure availability during client initialization
 
-### 2. Modify Chroma MCP Server
-
-Find where Chroma MCP initializes embedding functions and:
-- Add a new embedding function type called "custom" or "http"
-- Check for the custom embedding environment variables
-- If they exist, instantiate the custom embedding function
-- Make it available as an option when creating collections
-
-### 3. API Request Format
+### API Request Format
 
 The custom embedding API expects:
 - **Endpoint**: `POST {EMBEDDINGS_API_URL}/embeddings`
@@ -75,51 +67,22 @@ The custom embedding API expects:
   }
   ```
 
-### 4. Integration Points
+### How It Works
 
-Look for these key areas in the Chroma MCP codebase:
-- Where embedding functions are initialized/configured
-- The mapping of embedding function names to classes
-- Collection creation logic that sets the embedding function
-- Environment variable loading logic
+1. **Automatic Registration**: When `EMBEDDINGS_API_URL` and `EMBEDDING_MODEL` are set, the custom embedding function is automatically registered.
 
-### 5. Configuration Priority
+2. **Default Selection**: If no embedding function is specified when creating a collection, "custom" becomes the default when custom embeddings are configured.
 
-The custom embedding function should be used when:
-1. The `EMBEDDINGS_API_URL` environment variable is set
-2. No other specific embedding provider is configured
-3. The user hasn't explicitly chosen a different embedding function
+3. **Explicit Usage**: Users can explicitly specify `"embedding_function_name": "custom"` when creating collections.
 
-### 6. Error Handling
+### Error Handling
 
-Implement proper error handling for:
-- Missing environment variables (provide clear error messages)
-- API connection failures
-- Invalid API responses
-- Dimension mismatches between configured and actual embeddings
-- Rate limiting or timeout issues
-
-### 7. Testing Considerations
-
-Add tests or test manually:
-- Creating a collection with custom embeddings
-- Adding documents to the collection
-- Querying the collection
-- Verifying embeddings have correct dimensions
-- Handling API failures gracefully
-
-## Code Structure Suggestions
-
-1. **New file**: `custom_embedding_function.py` (or similar)
-   - Contains the CustomEmbeddingFunction class
-   - Handles all HTTP communication with the API
-
-2. **Modify**: The main server file where embedding functions are registered
-   - Add custom embedding function to the available options
-   - Check for custom embedding environment variables
-
-3. **Update**: Any configuration or initialization logic
-   - Ensure custom embeddings are properly initialized when env vars are present
+The implementation handles:
+- Missing environment variables (raises ValueError with clear messages)
+- API connection failures (raises Exception with connection error details)
+- HTTP errors (raises Exception with status code and response)
+- Invalid API responses (raises Exception if response format is incorrect)
+- Dimension mismatches (raises ValueError if actual dimensions don't match configured)
 
 ## Additional Notes
 
@@ -129,12 +92,30 @@ Add tests or test manually:
 - Consider adding logging for debugging custom embedding requests
 - The implementation should be clean and follow Chroma's coding patterns
 
-## Expected Outcome
+## Usage
 
-After implementation, users should be able to:
-1. Set the three environment variables in their `.env` file or system
+To use custom embeddings:
+1. Set the three environment variables in your `.env` file or system
 2. Start Chroma MCP normally
-3. Create collections that automatically use the custom embedding service
-4. All embedding operations (add, query) should use the Railway API transparently
+3. Create collections - they will automatically use the custom embedding service
+4. All embedding operations (add, query) will use your custom API transparently
 
-The custom embeddings should work seamlessly without users needing to specify anything beyond the environment variables.
+The custom embeddings work seamlessly without needing to specify anything beyond the environment variables.
+
+## Development Principles
+
+When working on this codebase, always follow these principles:
+- **KISS (Keep It Simple, Stupid)**: Prefer simple, readable solutions over clever or complex ones
+- **Discipline**: Write clean, consistent code that follows established patterns
+- **Verify Everything**: Test assumptions, validate inputs, and verify outputs before considering any task complete
+- **No Overcomplicated Code**: If a solution seems complex, step back and find a simpler approach
+
+## Future Improvements
+
+Potential enhancements to consider:
+- Add retry logic for transient HTTP failures
+- Support custom headers for authenticated endpoints
+- Add comprehensive unit tests for the CustomEmbeddingFunction
+- Update README.md to document this feature
+- Add support for configurable timeout values
+- Implement request/response logging for debugging

@@ -1,7 +1,8 @@
-from typing import Dict, List, TypedDict, Union, Optional
+from typing import Dict, List, Union, Optional
+from typing_extensions import TypedDict
 from enum import Enum
 import chromadb
-from chromadb import AdminClient
+from chromadb.admin import AdminClient
 from mcp.server.fastmcp import FastMCP
 import os
 from dotenv import load_dotenv
@@ -11,9 +12,8 @@ import ssl
 import uuid
 import time
 import json
-from typing_extensions import TypedDict
 import httpx
-from typing import List as TypingList
+import logging
 
 
 from chromadb.api.collection_configuration import (
@@ -28,6 +28,10 @@ from chromadb.utils.embedding_functions import (
     VoyageAIEmbeddingFunction,
     RoboflowEmbeddingFunction,
 )
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class CustomEmbeddingFunction(EmbeddingFunction):
     """Custom embedding function that uses an HTTP API endpoint."""
@@ -88,6 +92,10 @@ _admin_client = None
 _current_tenant = None
 _current_database = None
 
+def normalize_error_message(error: Exception) -> str:
+    """Ensure error messages are never empty."""
+    return str(error) or f"{type(error).__name__}: Unknown error occurred"
+
 def create_parser():
     """Create and return the argument parser."""
     parser = argparse.ArgumentParser(description='FastMCP server for Chroma DB')
@@ -125,7 +133,7 @@ def create_parser():
                        default=os.getenv('CHROMA_DOTENV_PATH', '.chroma_env'))
     return parser
 
-def get_chroma_client(args=None):
+def get_chroma_client(args=None, embedding_function=None):
     """Get or create the global Chroma client instance."""
     global _chroma_client, _current_tenant, _current_database
     if _chroma_client is None:
@@ -183,59 +191,13 @@ def get_chroma_client(args=None):
                     _current_database = database_to_use
                 
                 # Debug logging
-                print(f"Connecting to ChromaDB:")
-                print(f"  Host: {client_kwargs['host']}")
-                print(f"  Port: {client_kwargs['port']}")
-                print(f"  SSL: {client_kwargs['ssl']}")
-                print(f"  Auth: {'Yes' if args.custom_auth_credentials else 'No'}")
-                print(f"  Tenant: {client_kwargs.get('tenant', 'default_tenant')}")
-                print(f"  Database: {client_kwargs.get('database', 'default_database')}")
-                
-                # Handle IPv6 connectivity for Railway and other environments
-                import socket
-                import os
-                
-                # Detect if we're in an IPv6-only environment (like Railway private network)
-                # or if we need to handle dual-stack scenarios
-                if args.host:
-                    try:
-                        # Resolve the hostname to see what addresses are available
-                        addrs = socket.getaddrinfo(args.host, client_kwargs['port'], socket.AF_UNSPEC, socket.SOCK_STREAM)
-                        ipv4_addrs = [addr for addr in addrs if addr[0] == socket.AF_INET]
-                        ipv6_addrs = [addr for addr in addrs if addr[0] == socket.AF_INET6]
-                        
-                        print(f"  DNS Resolution:")
-                        if ipv4_addrs:
-                            print(f"    IPv4: {[addr[4][0] for addr in ipv4_addrs]}")
-                        if ipv6_addrs:
-                            print(f"    IPv6: {[addr[4][0] for addr in ipv6_addrs]}")
-                        
-                        # If we only have IPv6 addresses (Railway internal), we need to ensure
-                        # httpx can connect properly. Check if we're in Railway environment
-                        if ipv6_addrs and not ipv4_addrs:
-                            print("  Note: Only IPv6 addresses available (Railway private network)")
-                            # httpx should handle IPv6 properly, but let's make sure
-                            # by setting up the connection with explicit IPv6 support
-                            
-                    except Exception as e:
-                        print(f"  DNS resolution error: {e}")
-                
-                # Create the client with our configuration
-                try:
-                    _chroma_client = chromadb.HttpClient(**client_kwargs)
-                    print("Successfully connected to ChromaDB")
-                except Exception as e:
-                    print(f"Failed to connect to ChromaDB: {e}")
-                    # If it's an IPv6 connection issue, provide helpful information
-                    if "Connection refused" in str(e) and args.host and '.railway.internal' in args.host:
-                        print("  This might be an IPv6 connectivity issue.")
-                        print("  Ensure ChromaDB is listening on :: (IPv6) not 0.0.0.0 (IPv4)")
-                    raise
+                logger.info(f"Connecting to ChromaDB - Host: {client_kwargs['host']}, Port: {client_kwargs['port']}, SSL: {client_kwargs['ssl']}")
+                _chroma_client = chromadb.HttpClient(**client_kwargs)
             except ssl.SSLError as e:
-                print(f"SSL connection failed: {str(e)}")
+                logger.error(f"SSL connection failed: {str(e)}")
                 raise
             except Exception as e:
-                print(f"Error connecting to HTTP client: {str(e)}")
+                logger.error(f"Error connecting to HTTP client: {str(e)}")
                 raise
             
         elif args.client_type == 'cloud':
@@ -257,10 +219,10 @@ def get_chroma_client(args=None):
                     }
                 )
             except ssl.SSLError as e:
-                print(f"SSL connection failed: {str(e)}")
+                logger.error(f"SSL connection failed: {str(e)}")
                 raise
             except Exception as e:
-                print(f"Error connecting to cloud client: {str(e)}")
+                logger.error(f"Error connecting to cloud client: {str(e)}")
                 raise
                 
         elif args.client_type == 'persistent':
@@ -272,50 +234,46 @@ def get_chroma_client(args=None):
             
     return _chroma_client
 
-def get_admin_client(args=None):
-    """Get or create the global admin client instance."""
-    global _admin_client, _current_tenant, _current_database
+def get_or_create_admin_client(args=None):
+    """Get or create AdminClient, returns None if not available."""
+    global _admin_client
     
-    if _admin_client is None:
-        if args is None:
-            parser = create_parser()
-            args = parser.parse_args()
+    if _admin_client is not None:
+        return _admin_client
+    
+    # AdminClient only works with HTTP client type
+    if args is None:
+        parser = create_parser()
+        args = parser.parse_args([])  # Parse with empty args to get defaults
+    
+    if args.client_type != 'http':
+        logger.debug("AdminClient only available for HTTP client type")
+        return None
+    
+    if not args.host:
+        logger.debug("AdminClient requires host to be specified")
+        return None
+    
+    try:
+        # AdminClient uses Settings differently than HttpClient
+        settings = Settings()
+        settings.chroma_server_host = args.host
+        settings.chroma_server_http_port = str(args.port) if args.port else "8000"
         
-        # Load environment variables
-        load_dotenv(dotenv_path=args.dotenv_path)
+        if args.ssl:
+            settings.chroma_server_ssl_enabled = True
+            
+        if args.custom_auth_credentials:
+            settings.chroma_server_auth_credentials = args.custom_auth_credentials
+            settings.chroma_server_auth_provider = "chromadb.auth.basic_authn.BasicAuthenticationServerProvider"
         
-        if args.client_type == 'http':
-            if not args.host:
-                raise ValueError("Host must be provided for AdminClient")
-            
-            settings = Settings(
-                chroma_api_impl="chromadb.api.fastapi.FastAPI",
-                chroma_server_host=args.host,
-                chroma_server_http_port=str(args.port) if args.port else "8000"
-            )
-            
-            if args.custom_auth_credentials:
-                settings.chroma_client_auth_provider = "chromadb.auth.basic_authn.BasicAuthClientProvider"
-                settings.chroma_client_auth_credentials = args.custom_auth_credentials
-            
-            try:
-                _admin_client = AdminClient(settings)
-                print("Successfully created AdminClient")
-            except Exception as e:
-                print(f"Failed to create AdminClient: {e}")
-                raise
-        else:
-            # For local/persistent clients, AdminClient might not be supported
-            print("AdminClient is only supported for HTTP client type")
-            return None
-    
-    # Set current context from args or use defaults
-    if _current_tenant is None:
-        _current_tenant = args.tenant if args and args.tenant else DEFAULT_TENANT
-    if _current_database is None:
-        _current_database = args.database if args and args.database else DEFAULT_DATABASE
-    
-    return _admin_client
+        _admin_client = AdminClient(settings)
+        logger.info("Successfully created AdminClient")
+        return _admin_client
+        
+    except Exception as e:
+        logger.warning(f"AdminClient not available: {e}")
+        return None
 
 ##### Collection Tools #####
 
@@ -343,7 +301,7 @@ async def chroma_list_collections(
         return [coll.name for coll in colls]
 
     except Exception as e:
-        raise Exception(f"Failed to list collections: {str(e)}") from e
+        raise Exception(f"Failed to list collections: {normalize_error_message(e)}") from e
 
 mcp_known_embedding_functions: Dict[str, EmbeddingFunction] = {
     "default": DefaultEmbeddingFunction,
@@ -405,7 +363,7 @@ async def chroma_create_collection(
         config_msg = f" with configuration: {configuration}"
         return f"Successfully created collection {collection_name}{config_msg}"
     except Exception as e:
-        raise Exception(f"Failed to create collection '{collection_name}': {str(e)}") from e
+        raise Exception(f"Failed to create collection '{collection_name}': {normalize_error_message(e)}") from e
 
 @mcp.tool()
 async def chroma_peek_collection(
@@ -421,10 +379,31 @@ async def chroma_peek_collection(
     client = get_chroma_client()
     try:
         collection = client.get_collection(collection_name)
+        logger.info(f"Peeking collection '{collection_name}' with limit {limit}")
         results = collection.peek(limit=limit)
+        logger.info(f"Peek results type: {type(results)}, keys: {results.keys() if isinstance(results, dict) else 'Not a dict'}")
+        
+        # Handle empty collection case
+        if not results.get('ids') or len(results.get('ids', [])) == 0:
+            empty_result = {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+                "embeddings": None,
+                "message": "Collection is empty"
+            }
+            logger.info(f"Collection is empty, returning: {empty_result}")
+            return empty_result
+        
+        logger.info(f"Returning peek results with {len(results.get('ids', []))} documents")
         return results
     except Exception as e:
-        raise Exception(f"Failed to peek collection '{collection_name}': {str(e)}") from e
+        logger.error(f"Error peeking collection: {e}", exc_info=True)
+        # Add more context to the error
+        error_msg = normalize_error_message(e)
+        if "embedding" in error_msg.lower():
+            error_msg += " (This might be due to missing embedding function configuration)"
+        raise Exception(f"Failed to peek collection '{collection_name}': {error_msg}") from e
 
 @mcp.tool()
 async def chroma_get_collection_info(collection_name: str) -> Dict:
@@ -440,30 +419,53 @@ async def chroma_get_collection_info(collection_name: str) -> Dict:
         # Get collection count
         count = collection.count()
         
-        # Peek at a few documents
-        peek_results = collection.peek(limit=3)
+        # Try to peek at a few documents, handle empty collection
+        try:
+            peek_results = collection.peek(limit=3)
+            if not peek_results.get('ids') or len(peek_results.get('ids', [])) == 0:
+                peek_results = {"message": "Collection is empty"}
+        except Exception as peek_error:
+            # If peek fails, still return count info
+            peek_results = {"error": f"Could not peek: {normalize_error_message(peek_error)}"}
+        
+        # Get metadata if available
+        metadata = {}
+        if hasattr(collection, 'metadata') and collection.metadata:
+            metadata = collection.metadata
         
         return {
             "name": collection_name,
             "count": count,
+            "metadata": metadata,
             "sample_documents": peek_results
         }
     except Exception as e:
-        raise Exception(f"Failed to get collection info for '{collection_name}': {str(e)}") from e
+        error_msg = normalize_error_message(e)
+        if "embedding" in error_msg.lower():
+            error_msg += " (This might be due to missing embedding function configuration)"
+        raise Exception(f"Failed to get collection info for '{collection_name}': {error_msg}") from e
     
 @mcp.tool()
-async def chroma_get_collection_count(collection_name: str) -> int:
+async def chroma_get_collection_count(collection_name: str) -> Dict[str, int]:
     """Get the number of documents in a Chroma collection.
     
     Args:
         collection_name: Name of the collection to count
+    
+    Returns:
+        Dictionary with 'count' key containing the number of documents
     """
     client = get_chroma_client()
     try:
         collection = client.get_collection(collection_name)
-        return collection.count()
+        count = collection.count()
+        logger.info(f"Collection '{collection_name}' count: {count}")
+        result = {"count": count}
+        logger.info(f"Returning result: {result}")
+        return result
     except Exception as e:
-        raise Exception(f"Failed to get collection count for '{collection_name}': {str(e)}") from e
+        logger.error(f"Error getting collection count: {e}", exc_info=True)
+        raise Exception(f"Failed to get collection count for '{collection_name}': {normalize_error_message(e)}") from e
 
 @mcp.tool()
 async def chroma_modify_collection(
@@ -491,7 +493,7 @@ async def chroma_modify_collection(
         
         return f"Successfully modified collection {collection_name}: updated {' and '.join(modified_aspects)}"
     except Exception as e:
-        raise Exception(f"Failed to modify collection '{collection_name}': {str(e)}") from e
+        raise Exception(f"Failed to modify collection '{collection_name}': {normalize_error_message(e)}") from e
 
 @mcp.tool()
 async def chroma_delete_collection(collection_name: str) -> str:
@@ -505,7 +507,7 @@ async def chroma_delete_collection(collection_name: str) -> str:
         client.delete_collection(collection_name)
         return f"Successfully deleted collection {collection_name}"
     except Exception as e:
-        raise Exception(f"Failed to delete collection '{collection_name}': {str(e)}") from e
+        raise Exception(f"Failed to delete collection '{collection_name}': {normalize_error_message(e)}") from e
 
 ##### Document Tools #####
 @mcp.tool()
@@ -569,7 +571,7 @@ async def chroma_add_documents(
         # Default return
         return f"Successfully added {len(documents)} documents to collection {collection_name}, result is {result}"
     except Exception as e:
-        raise Exception(f"Failed to add documents to collection '{collection_name}': {str(e)}") from e
+        raise Exception(f"Failed to add documents to collection '{collection_name}': {normalize_error_message(e)}") from e
 
 @mcp.tool()
 async def chroma_query_documents(
@@ -609,7 +611,7 @@ async def chroma_query_documents(
             include=include
         )
     except Exception as e:
-        raise Exception(f"Failed to query documents from collection '{collection_name}': {str(e)}") from e
+        raise Exception(f"Failed to query documents from collection '{collection_name}': {normalize_error_message(e)}") from e
 
 @mcp.tool()
 async def chroma_get_documents(
@@ -643,7 +645,9 @@ async def chroma_get_documents(
     client = get_chroma_client()
     try:
         collection = client.get_collection(collection_name)
-        return collection.get(
+        logger.info(f"Getting documents from collection '{collection_name}' with limit={limit}, offset={offset}")
+        
+        results = collection.get(
             ids=ids,
             where=where,
             where_document=where_document,
@@ -651,8 +655,29 @@ async def chroma_get_documents(
             limit=limit,
             offset=offset
         )
+        
+        logger.info(f"Get results type: {type(results)}, keys: {results.keys() if isinstance(results, dict) else 'Not a dict'}")
+        
+        # Handle empty collection case
+        if not results.get('ids') or len(results.get('ids', [])) == 0:
+            empty_result = {
+                "ids": [],
+                "documents": [],
+                "metadatas": [],
+                "embeddings": None,
+                "message": "No documents found in collection"
+            }
+            logger.info(f"No documents found, returning: {empty_result}")
+            return empty_result
+        
+        logger.info(f"Returning {len(results.get('ids', []))} documents")
+        return results
     except Exception as e:
-        raise Exception(f"Failed to get documents from collection '{collection_name}': {str(e)}") from e
+        logger.error(f"Error getting documents: {e}", exc_info=True)
+        error_msg = normalize_error_message(e)
+        if "embedding" in error_msg.lower():
+            error_msg += " (This might be due to missing embedding function configuration)"
+        raise Exception(f"Failed to get documents from collection '{collection_name}': {error_msg}") from e
 
 @mcp.tool()
 async def chroma_update_documents(
@@ -706,7 +731,7 @@ async def chroma_update_documents(
         collection = client.get_collection(collection_name)
     except Exception as e:
         raise Exception(
-            f"Failed to get collection '{collection_name}': {str(e)}"
+            f"Failed to get collection '{collection_name}': {normalize_error_message(e)}"
         ) from e
 
     # Prepare arguments for update, excluding None values at the top level
@@ -726,7 +751,7 @@ async def chroma_update_documents(
         )
     except Exception as e:
         raise Exception(
-            f"Failed to update documents in collection '{collection_name}': {str(e)}"
+            f"Failed to update documents in collection '{collection_name}': {normalize_error_message(e)}"
         ) from e
 
 @mcp.tool()
@@ -755,7 +780,7 @@ async def chroma_delete_documents(
         collection = client.get_collection(collection_name)
     except Exception as e:
         raise Exception(
-            f"Failed to get collection '{collection_name}': {str(e)}"
+            f"Failed to get collection '{collection_name}': {normalize_error_message(e)}"
         ) from e
 
     try:
@@ -766,7 +791,7 @@ async def chroma_delete_documents(
         )
     except Exception as e:
         raise Exception(
-            f"Failed to delete documents from collection '{collection_name}': {str(e)}"
+            f"Failed to delete documents from collection '{collection_name}': {normalize_error_message(e)}"
         ) from e
 
 ##### Admin Tools #####
@@ -777,31 +802,118 @@ async def chroma_list_databases(
     limit: Optional[int] = None,
     offset: Optional[int] = None
 ) -> List[Dict[str, str]]:
-    """List all databases in a tenant.
-    
-    Note: This is a simplified version that returns known database.
-    AdminClient support requires ChromaDB server configuration.
+    """List databases in a tenant.
     
     Args:
-        tenant: Tenant name (uses current context if not provided)
+        tenant: Tenant name (uses current or default if not provided)
         limit: Maximum number of databases to return
         offset: Number of databases to skip
     
     Returns:
-        List of database information dictionaries
+        List of database information or error if AdminClient not available
     """
-    global _current_tenant
+    admin = get_or_create_admin_client()
     
-    # For now, return the default database as AdminClient requires special server config
-    tenant_name = tenant or _current_tenant or DEFAULT_TENANT
+    if admin is None:
+        # Fallback to returning current database when AdminClient not available
+        return [{
+            "name": _current_database or DEFAULT_DATABASE,
+            "tenant": _current_tenant or DEFAULT_TENANT,
+            "note": "AdminClient not available - showing current database only"
+        }]
     
-    return [
-        {
-            "name": DEFAULT_DATABASE,
-            "id": "default",
+    try:
+        tenant_name = tenant or _current_tenant or DEFAULT_TENANT
+        databases = admin.list_databases(tenant=tenant_name, limit=limit, offset=offset)
+        
+        return [
+            {
+                "name": db.name,
+                "id": db.id,
+                "tenant": db.tenant
+            }
+            for db in databases
+        ]
+    except Exception as e:
+        logger.error(f"Failed to list databases: {e}")
+        # Fallback to current database on error
+        return [{
+            "name": _current_database or DEFAULT_DATABASE,
+            "tenant": _current_tenant or DEFAULT_TENANT,
+            "error": str(e)
+        }]
+
+@mcp.tool()
+async def chroma_create_database(
+    database: str,
+    tenant: Optional[str] = None
+) -> Dict[str, str]:
+    """Create a new database in a tenant.
+    
+    Args:
+        database: Name of the database to create
+        tenant: Tenant name (uses current or default if not provided)
+    
+    Returns:
+        Success message or error
+    """
+    admin = get_or_create_admin_client()
+    
+    if admin is None:
+        return {
+            "error": "AdminClient not available - database creation requires HTTP client with proper configuration"
+        }
+    
+    try:
+        tenant_name = tenant or _current_tenant or DEFAULT_TENANT
+        admin.create_database(database=database, tenant=tenant_name)
+        
+        return {
+            "message": f"Successfully created database '{database}' in tenant '{tenant_name}'",
+            "database": database,
             "tenant": tenant_name
         }
-    ]
+    except Exception as e:
+        return {
+            "error": f"Failed to create database: {normalize_error_message(e)}"
+        }
+
+@mcp.tool()
+async def chroma_delete_database(
+    database: str,
+    tenant: Optional[str] = None
+) -> Dict[str, str]:
+    """Delete a database from a tenant.
+    
+    Args:
+        database: Name of the database to delete
+        tenant: Tenant name (uses current or default if not provided)
+    
+    Returns:
+        Success message or error
+    """
+    admin = get_or_create_admin_client()
+    
+    if admin is None:
+        return {
+            "error": "AdminClient not available - database deletion requires HTTP client with proper configuration"
+        }
+    
+    try:
+        tenant_name = tenant or _current_tenant or DEFAULT_TENANT
+        admin.delete_database(database=database, tenant=tenant_name)
+        
+        return {
+            "message": f"Successfully deleted database '{database}' from tenant '{tenant_name}'",
+            "database": database,
+            "tenant": tenant_name
+        }
+    except Exception as e:
+        return {
+            "error": f"Failed to delete database: {normalize_error_message(e)}"
+        }
+
+##### Context Management Tools #####
 
 @mcp.tool()
 async def chroma_get_current_context() -> Dict[str, str]:
@@ -847,35 +959,6 @@ async def chroma_switch_context(
         "database": _current_database or DEFAULT_DATABASE
     }
 
-@mcp.tool()
-async def chroma_list_all_collections() -> Dict[str, List[str]]:
-    """List all collections across all databases in the current tenant.
-    
-    Note: Simplified version that lists collections in current database only.
-    Full AdminClient support requires ChromaDB server configuration.
-    
-    Returns:
-        Dictionary mapping database names to their collections
-    """
-    global _current_database
-    
-    try:
-        # Just list collections in current database
-        client = get_chroma_client()
-        collections = client.list_collections()
-        
-        current_db = _current_database or DEFAULT_DATABASE
-        
-        if collections:
-            return {
-                current_db: [col.name for col in collections]
-            }
-        else:
-            return {
-                current_db: []
-            }
-    except Exception as e:
-        raise Exception(f"Failed to list collections: {str(e)}") from e
 
 def validate_thought_data(input_data: Dict) -> Dict:
     """Validate thought data structure."""
@@ -930,13 +1013,13 @@ def main():
     # Initialize client with parsed args
     try:
         get_chroma_client(args)
-        print("Successfully initialized Chroma client")
+        logger.info("Successfully initialized Chroma client")
     except Exception as e:
-        print(f"Failed to initialize Chroma client: {str(e)}")
+        logger.error(f"Failed to initialize Chroma client: {str(e)}")
         raise
     
     # Initialize and run the server
-    print("Starting MCP server")
+    logger.info("Starting MCP server")
     mcp.run(transport='stdio')
     
 if __name__ == "__main__":
