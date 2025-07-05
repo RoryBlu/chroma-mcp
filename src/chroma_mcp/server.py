@@ -72,7 +72,7 @@ class CustomEmbeddingFunction(EmbeddingFunction):
         if not self.api_url.endswith('/embeddings'):
             self.api_url = f"{self.api_url.rstrip('/')}/embeddings"
     
-    def __call__(self, input: TypingList[str]) -> TypingList[TypingList[float]]:
+    def __call__(self, input: List[str]) -> List[List[float]]:
         """Generate embeddings for a list of input texts."""
         try:
             with httpx.Client(timeout=30.0) as client:
